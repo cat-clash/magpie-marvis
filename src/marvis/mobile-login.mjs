@@ -580,18 +580,30 @@ export function mobileOauthLogin({
 
       const base = instructions ?? mobileInstructions(loginType)
       // 说明里同时给出：壳的输入框怎么用、本地页在哪、QQ 怎么唤起 App
-      const withEntry = [
-        base,
-        "",
-        `完成授权后，把浏览器停在的那条 yybadaccess.3g.qq.com/…marvis_oauth?…code=… 地址整条复制，`,
-        `粘贴到下面的输入框提交。`,
-        `（如果下面没有输入框，用手机浏览器打开这个本机登录页，那上面有按钮和粘贴框）：${paste.url}`,
-      ].join("\n")
+      const withEntry =
+        loginType === "WX"
+          ? [
+              base,
+              "",
+              `点「打开浏览器」打开的是**本机引导页**（不是扫码页）：上面有「唤起微信」按钮和「复制授权链接」。`,
+              `在微信里点「允许」后，把浏览器停在的那条 yybadaccess.3g.qq.com/…marvis_oauth?…code=… 地址整条复制，`,
+              `粘贴到下面的输入框提交（引导页上也有粘贴框，二选一即可）。`,
+            ].join("\n")
+          : [
+              base,
+              "",
+              `完成授权后，把浏览器停在的那条 yybadaccess.3g.qq.com/…marvis_oauth?…code=… 地址整条复制，`,
+              `粘贴到下面的输入框提交。`,
+              `（如果下面没有输入框，用手机浏览器打开这个本机登录页，那上面有按钮和粘贴框）：${paste.url}`,
+            ].join("\n")
 
       return {
-        // ⚠ url 是**授权页**（不是本地页）：opened:false 时宿主会打开它 ——
-        //   系统浏览器才有权限处理其中的 App 唤起跳转。
-        url: authUrl,
+        // ⚠ WX 的 url 必须是**本机引导页**（0.7.6 修复）：opened:false 时宿主直接打开 url，
+        //   上一版给的是 qrconnect 授权页 → 手机上看到的永远是一张二维码图片，
+        //   「唤起微信 + 复制授权链接」那套按钮全在本地页里，用户根本走不到。
+        //   现在壳打开的就是引导页，qrconnect 只作为页内的授权链接存在。
+        //   QQ 仍给授权页：系统浏览器打开 graph.qq.com 才能触发 mqqapi 唤起手机 QQ。
+        url: loginType === "WX" ? paste.url : authUrl,
         // ⚠ opened:false —— 让壳显示「打开浏览器」按钮（上一版 true 把这个入口藏了）
         opened: false,
         // ⚠ method:"code" —— 让壳渲染粘贴输入框（上一版 auto 把它藏了）

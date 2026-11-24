@@ -5,6 +5,13 @@ process.env.MARVIS_DIRECT_TRANSPORT ??= "fetch"
 // 0.5.4 起 uskey 出票默认 fail-fast：本文件只测请求改写 / 错误分流（断言不涉及
 // uskey 值），显式 opt-in 随机 uskey 让 llmHeaders 在无 native 的离线环境可用
 process.env.MARVIS_ALLOW_RANDOM_USKEY = "1"
+// 熔断器持久化在 ~/.magpie-marvis-native/breaker-state.json —— 宿主机真实跑过
+// 插件（账号被 4100404 风控）时那里有 open 状态，会把本文件所有出网断言打成
+// 本地 429 risk_cooldown。测试必须指向空临时目录，绝不读宿主真实熔断状态。
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+process.env.MARVIS_NATIVE_DIR = mkdtempSync(join(tmpdir(), "magpie-loader-test-"))
 // tests/loader-model-support.test.mjs —— 模型不可用名单闸（只拦明确不可用的模型）
 //
 // 事故现场：手工配置或陈旧路由里写着 `marvis/kimi-k2.5`（上游稳定 5104002 RPC 500）——

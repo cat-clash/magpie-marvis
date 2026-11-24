@@ -6,6 +6,13 @@
 //
 // 跑法：MARVIS_TRANSPORT=direct node --test tests/loader-revoked.test.mjs
 
+// 熔断器持久化在 ~/.magpie-marvis-native/breaker-state.json —— 宿主真实跑过插件
+// 时那里可能有 open 状态。测试指向空临时目录隔离，绝不读宿主真实熔断状态。
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+process.env.MARVIS_NATIVE_DIR = mkdtempSync(join(tmpdir(), "magpie-revoked-test-"))
+
 import test from "node:test"
 import assert from "node:assert/strict"
 

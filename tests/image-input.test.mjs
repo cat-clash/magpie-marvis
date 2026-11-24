@@ -5,6 +5,12 @@ process.env.MARVIS_DIRECT_TRANSPORT ??= "fetch"
 // 0.5.4 起 uskey 出票默认 fail-fast：本文件只测图片归一（断言不涉及 uskey 值），
 // 显式 opt-in 随机 uskey 让 llmHeaders 在无 native 的离线环境可用
 process.env.MARVIS_ALLOW_RANDOM_USKEY = "1"
+// 熔断器持久化在 ~/.magpie-marvis-native/breaker-state.json —— 宿主真实跑过插件
+// 时那里可能有 open 状态，会把出网断言打成本地 429。测试指向空临时目录隔离。
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+process.env.MARVIS_NATIVE_DIR = mkdtempSync(join(tmpdir(), "magpie-image-test-"))
 // issue #8 回归锁：main-auto 能力声明 + 三种图片输入归一。
 // 全部离线；远程图片与 Marvis 网关都用 stub，不需要凭据。
 

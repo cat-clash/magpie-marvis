@@ -214,10 +214,13 @@ function fakeServer(url = "http://127.0.0.1:4618/") {
   })
 }
 
-test("mobileOauthLogin：微信 authorize 走 qrconnect，instructions 教唤起微信 App", async () => {
+test("mobileOauthLogin：微信 authorize 打开本机引导页（不是 qrconnect 扫码页），instructions 教唤起微信 App", async () => {
   const m = mobileOauthLogin({ loginType: "WX", toAuth: (a) => a, startServer: fakeServer() })
   const r = await m.authorize()
-  assert.match(r.url, /open\.weixin\.qq\.com\/connect\/qrconnect/)
+  // ⚠ 0.7.6 修复：上一版 url=qrconnect → 壳「打开浏览器」直接开出一张二维码图片，
+  //   用户根本走不到「唤起微信 + 复制授权链接」那套按钮。现在 url 必须是本机引导页。
+  assert.match(r.url, /^http:\/\/127\.0\.0\.1:\d+\//, "微信必须打开本机引导页，不能直接开 qrconnect")
+  assert.doesNotMatch(r.url, /open\.weixin\.qq\.com/, "壳打开的 url 里不许出现 qrconnect")
   assert.match(r.instructions, /唤起微信/)
   assert.match(r.instructions, /复制授权链接/)
   assert.doesNotMatch(r.instructions, /识别图中二维码/)
@@ -404,6 +407,15 @@ test("methods：手机环境 —— 三个入口都在（QQ / 微信 / 浏览器
         list.some((m) => /粘贴回调地址/.test(m.label)),
         "手机端必须有「浏览器 · 粘贴回调地址」入口",
       )
+
+      // 0.7.6：账号管理入口 —— 壳对首选账号不渲染移除按钮，插件在登录菜单里补一个
+      const mgr = list.find((m) => /账号管理/.test(m.label))
+      assert.ok(mgr, "手机端必须有「账号管理（取消登录 / 移除账号）」入口")
+      const mr = await mgr.authorize()
+      await mr.cancel?.()
+      assert.match(mr.url, /^http:\/\/127\.0\.0\.1:\d+\//, "账号管理必须打开本机管理页")
+      assert.match(mr.instructions, /取消登录/)
+      assert.match(mr.instructions, /移除/)
 
       // 手机上没有 Windows 进程可读 —— 「从本机导入」不该出现
       assert.equal(

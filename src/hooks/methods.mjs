@@ -32,6 +32,7 @@ import { resolveAccount } from "../account-name.mjs"
 import { importFromDesktop, desktopAvailable } from "../marvis/desktop.mjs"
 import { fetchUserProfile, accountLabel } from "../marvis/profile.mjs"
 import { isMobile, mobileOauthLogin, mobileInstructions } from "../marvis/mobile-login.mjs"
+import { accountManagerMethod } from "../marvis/account-manager.mjs"
 
 /**
  * 登录过程中的 state → 虚拟设备 guid。
@@ -346,6 +347,10 @@ export function methods() {
         toAuth,
       }),
     )
+    // 0.7.6：账号管理入口 —— 壳的账号卡片对「首选」账号不渲染移除按钮（壳侧 UI，
+    // 插件 auth 协议没有 remove/logout 扩展点），但登录方法列表壳一定会渲染。
+    // 把「取消登录 / 移除」做成一个登录方法：点它 → 本机管理页 → 每个账号都有按钮。
+    list.push(accountManagerMethod())
   } else {
     list.push(
       oauthLogin(

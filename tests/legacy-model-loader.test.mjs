@@ -5,6 +5,12 @@ process.env.MARVIS_DIRECT_TRANSPORT ??= "fetch"
 // 0.5.4 起 uskey 出票默认 fail-fast：本文件只测模型闸 / 出网次数（断言不涉及
 // uskey 值），显式 opt-in 随机 uskey 让 llmHeaders 在无 native 的离线环境可用
 process.env.MARVIS_ALLOW_RANDOM_USKEY = "1"
+// 熔断器持久化在 ~/.magpie-marvis-native/breaker-state.json —— 宿主真实跑过插件
+// 时那里可能有 open 状态，会把出网断言打成本地 429。测试指向空临时目录隔离。
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+process.env.MARVIS_NATIVE_DIR = mkdtempSync(join(tmpdir(), "magpie-legacy-test-"))
 // tests/legacy-model-loader.test.mjs —— 旧真实槽位必须继续出网（0.2.21 allowlist 误伤回归锁）
 //
 // 事故现场：0.2.21 的 loader 用 TABLE allowlist 拦模型。TABLE 是**对外展示目录**，

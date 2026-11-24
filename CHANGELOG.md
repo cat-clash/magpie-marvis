@@ -1,5 +1,27 @@
 # 更新记录
 
+## 0.7.6 — 2026-11-25
+
+- **壳里就能管理账号（含首选账号）**：手机端登录菜单新增「账号管理（取消登录 / 移除账号）」入口
+  （`src/marvis/account-manager.mjs`）。点它 →「打开浏览器」→ 本机管理页（默认 `127.0.0.1:4619`，
+  一次性 token 防 CSRF）上**每个账号**都有「取消登录」「移除」按钮 —— magpie 壳对首选账号不渲染
+  移除按钮是壳侧 UI 限制，管理页不受它约束。只认整键（模糊选择器一律拒绝，防误删）；
+  页面渲染时的账号快照作为并发基线，壳中途写回文件 → 409 可读错误、原文件不动；
+  写盘前 `.bak-<时间戳>` 备份 + 原子替换。操作后需完全退出并重启 magpie（壳有内存态）。
+- **微信登录不再直接打开二维码页**：`mobileOauthLogin` 给壳的 `url` 从 qrconnect 改成本机引导页
+  （`paste.url`）。上一版壳「打开浏览器」直接开出扫码图片，用户根本走不到「唤起微信 + 复制授权链接」
+  那套按钮；现在打开就是引导页，qrconnect 只留在页内的备用链接里。QQ 分支不变。
+- **账号语义抽成唯一共享层** `src/marvis/accounts-store.mjs`：CLI（`scripts/accounts.mjs` 改薄壳）
+  与管理页共用同一套选择器优先级 / logout 字段形状（`access:""`+`refresh:""`+`expires:1000`+
+  `metadata.revokedAt`，身份字段保留）/ 乐观并发 / 备份原子写。该模块不 exit 不打印，错误一律 throw。
+- **测试与宿主环境隔离**：`loader-model-support` / `legacy-model-loader` / `image-input` /
+  `loader-revoked` 四个套件把 `MARVIS_NATIVE_DIR` 指向空临时目录 —— 宿主真实跑过插件时
+  `~/.magpie-marvis-native/breaker-state.json` 里的 open 熔断状态会把所有出网断言打成本地
+  429 `risk_cooldown`（本次 32 例假失败的根因）。新增 `tests/account-manager.test.mjs` 11 例
+  （每账号两按钮 / logout 形状与备份 / 幂等 / remove 整删 / CSRF 403 / 模糊键 400 / 并发 409 /
+  空目录 / 方法形状与 cancel / HTML 转义）；`tests/mobile-login.test.mjs` 钉住「微信壳 url 必须是
+  本机引导页、不得是 qrconnect」与账号管理入口。全套 355 例 0 失败。
+
 ## 0.7.5 — 2026-11-25
 
 - **诊断脚本 `--fix` 变成真自愈**：写完 `gateway.json` 后，如果 8088 上没人监听，脚本会按

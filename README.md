@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.5）
+# 腾讯 Marvis · magpie 供应商插件（0.7.6）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.5）
+## 传输通道（0.7.6）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -35,8 +35,13 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 / 0.7.5 新增（手机上最常用的三条）
+## 0.7.4 – 0.7.6 新增（手机上最常用的几条）
 
+- **壳里就能管理账号**（0.7.6）：手机端登录菜单新增「**账号管理（取消登录 / 移除账号）**」入口，
+  点它 →「打开浏览器」→ 本机管理页上**每个账号**（包括 magpie 卡片上没有移除按钮的首选账号）
+  都有「取消登录」「移除」按钮；写盘前自动备份，操作后完全退出并重启 magpie 生效。
+- **微信登录不再打开二维码页**（0.7.6）：点微信登录的「打开浏览器」现在打开的是**本机引导页**
+  （唤起微信 + 复制授权链接那套按钮），不再直接开出 qrconnect 扫码图片。
 - **账号随便取消登录 / 移除**（0.7.4）：`node scripts/cli.mjs accounts list|logout|remove`，
   不再受「第一个账号删不掉」限制；`list --verbose` 看 `expires`/`guid`/字段全集，`--json` 给脚本接管（0.7.5）。
 - **503 一键自愈**（0.7.5）：`sh ~/.magpie-marvis-native/magpie-marvis-diag.sh --fix`
