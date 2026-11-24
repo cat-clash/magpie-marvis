@@ -1,5 +1,17 @@
 # 更新记录
 
+## 0.7.3 — 2026-11-25
+
+**手机 503 诊断 + 微信登录指引优化**
+
+- 网关 502/503 错误响应补 `diagnosis_hint` / `diagnose_command`，直接告诉用户执行
+  `sh ~/.magpie-marvis-native/magpie-marvis-diag.sh`。
+- `phone-setup.sh` 把诊断脚本复制为 `~/.magpie-marvis-native/magpie-marvis-diag.sh`，并把
+  `gateway.json` 写入 `schemaVersion: 1`。
+- 微信手机登录页改为「优先在浏览器菜单/分享里选在微信中打开，让微信 App 授权；仍显示二维码时再长按识别」，
+  明确不再引导下载/保存二维码图片扫码；保留备用授权链接、本机粘贴页与宿主粘贴输入框。
+- README 标题与传输通道章节版本号同步到 0.7.3。
+
 ## 0.7.2 — 2026-11-24
 
 **手机登录修复：把宿主的粘贴输入框和唤起按钮拿回来**

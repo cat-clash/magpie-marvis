@@ -40,10 +40,11 @@ fi
 PORT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1],encoding="utf-8")).get("port",8088))' "$GW/config.json" 2>/dev/null || echo 8088)
 URL="http://127.0.0.1:$PORT/v1"
 
-echo "[3/4] 写 gateway.json 到 $NATIVE"
+echo "[3/5] 写 gateway.json 到 $NATIVE"
 mkdir -p "$NATIVE"
 cat > "$NATIVE/gateway.json" <<EOF
 {
+  "schemaVersion": 1,
   "mode": "gateway",
   "url": "$URL",
   "key": "",
@@ -52,12 +53,20 @@ cat > "$NATIVE/gateway.json" <<EOF
 EOF
 echo "  已写：$NATIVE/gateway.json  →  $URL"
 
+echo "[4/5] 复制诊断脚本到稳定目录"
+if [ -f "$DIR/scripts/magpie-marvis-diag.sh" ]; then
+  cp "$DIR/scripts/magpie-marvis-diag.sh" "$NATIVE/magpie-marvis-diag.sh"
+  chmod +x "$NATIVE/magpie-marvis-diag.sh" 2>/dev/null || true
+  echo "  已写：$NATIVE/magpie-marvis-diag.sh"
+else
+  echo "  跳过：仓库脚本 $DIR/scripts/magpie-marvis-diag.sh 不存在"
+fi
 if [ "${1:-}" = "--no-start" ]; then
-  echo "[4/4] 跳过启动（--no-start）。手动起：cd '$GW' && sh run.sh start"
+  echo "[5/5] 跳过启动（--no-start）。手动起：cd '$GW' && sh run.sh start"
   exit 0
 fi
 
-echo "[4/4] 启动本地网关（监听 127.0.0.1:$PORT）"
+echo "[5/5] 启动本地网关（监听 127.0.0.1:$PORT）"
 cd "$GW"
 if ! sh run.sh start; then
   echo "网关启动失败：请查看 $GW/logs/serve.log"

@@ -130,16 +130,18 @@ export function qqAppLaunchUrl(authorizeUrl) {
  *
  * `open.weixin.qq.com/connect/qrconnect` 是**网站应用扫码登录**页，手机浏览器打开
  * 只显示二维码。能真正走通微信授权的两种办法：
- *   ① 长按二维码 →「识别图中二维码」（跳进微信继续授权）；
- *   ② 在浏览器菜单里选「在微信中打开」（微信内置浏览器会直接渲染授权页）。
- * 所以这里只能给提示 + 链接，不给假的 scheme。
+ *   ① 在浏览器菜单里选「在微信中打开」/「分享到微信 → 在微信中打开」（推荐，直接唤起微信 App 授权）；
+ *   ② 长按授权页上的二维码 →「识别图中二维码」（适用于仍显示二维码的页面）。
+ * 目前部分手机浏览器已移除「下载二维码图片后用微信扫一扫」的链路；本插件不引导保存二维码图片，
+ * 而是引导用户把授权链接交给微信 App 或在微信内打开。
+ * 所以这里只给提示 + 链接，不给假的 scheme。
  *
  * @returns {string}
  */
 export const WECHAT_OPEN_HINT =
-  "本页是微信「网站应用扫码登录」页。" +
-  "手机上请**长按二维码 → 识别图中二维码**（或用浏览器菜单「在微信中打开」），" +
-  "才能唤起微信完成授权。"
+  "手机上优先让微信 App 来授权：点下面的授权按钮后，在浏览器菜单里选「在微信中打开」" +
+  "（或「分享 → 微信 → 在微信中打开」）。如果页面仍显示二维码，再长按二维码 → 识别图中二维码。" +
+  "不要保存二维码图片再扫。"
 
 /** 手机端页面外壳：中文、移动端 viewport、深色模式友好、不引任何外部资源 */
 function page(title, body) {
@@ -169,6 +171,9 @@ function page(title, body) {
   a.primary{display:block;margin:12px 0 6px;padding:16px;border-radius:10px;background:#1677ff;
     color:#fff;text-align:center;font-size:16px;font-weight:600;text-decoration:none}
   a.primary:active{opacity:.8}
+  a.secondary{display:block;margin:10px 0 6px;padding:14px;border-radius:10px;border:1px solid #1677ff;
+    color:#1677ff;background:transparent;text-align:center;font-size:15px;font-weight:600;text-decoration:none}
+  a.secondary:active{opacity:.8}
   a.alt{display:inline-block;margin-top:6px;color:#1677ff;font-size:15px;text-decoration:underline}
   .lead{font-size:15px;line-height:1.6}
   hr{border:0;border-top:1px solid #e3e6ea;margin:22px 0 4px}
@@ -194,10 +199,11 @@ function page(title, body) {
 export function mobileInstructions(loginType) {
   if (loginType === "WX") {
     return [
-      "1) 点上面的按钮用手机浏览器打开微信授权页",
-      "2) 页面上是一个二维码 —— **长按二维码，选「识别图中二维码」**，就会跳进微信让你确认",
-      "3) 确认后浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
-      "4) 长按地址栏 → 全选 → 复制，把那条地址整条**粘贴到下面的 Code 输入框**提交",
+      "1) 点上面的按钮用手机浏览器打开微信授权页（不要保存二维码图片）",
+      "2) 首选：在浏览器菜单里选「在微信中打开」/「分享 → 微信 → 在微信中打开」，让微信 App 来完成授权",
+      "3) 备用：如果页面仍显示二维码，长按二维码，选「识别图中二维码」",
+      "4) 在微信里确认授权后回到浏览器，浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
+      "5) 长按地址栏 → 全选 → 复制，把那条地址整条**粘贴到下面的 Code 输入框**提交",
     ].join("\n")
   }
   return [
@@ -227,7 +233,10 @@ function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
   const primaryHref = isWx ? authUrl : qqAppLaunchUrl(authUrl)
   const primaryText = isWx ? `打开微信授权页（${name}）` : `唤起手机 QQ 登录（${name}）`
   const fallback = isWx
-    ? `<p class="muted">${esc(WECHAT_OPEN_HINT)}</p>`
+    ? `<p class="muted">${esc(WECHAT_OPEN_HINT)}</p>
+       <a class="secondary" href="${esc(authUrl)}" target="_blank" rel="noreferrer">备用：用系统浏览器重新打开授权页</a>
+       <p class="muted">如果按钮没反应，长按下面这个链接复制地址，再粘贴到系统浏览器地址栏打开：<br>
+       <code>${esc(authUrl)}</code></p>`
     : `<p class="muted">没装手机 QQ 时，用下面的按钮在浏览器里完成网页版登录：<br>
        <a class="alt" href="${esc(authUrl)}" target="_blank" rel="noreferrer">用浏览器打开 QQ 授权页</a></p>`
 

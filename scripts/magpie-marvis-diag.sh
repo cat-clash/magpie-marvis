@@ -1,11 +1,14 @@
 #!/bin/sh
 # magpie-marvis 端口与 503 诊断脚本（Termux / POSIX sh）
-# 用法：sh magpie-marvis-diag.sh
-# 只读诊断，不修改任何配置；不依赖 jq。
+# 用法：sh magpie-marvis-diag.sh [--fix]
+# 只读诊断默认；--fix 会在确认使用 8088 HTTP 网关时补写 gateway.json 与稳定目录脚本。
+# 不依赖 jq。
 
 set -u
 
 GW_JSON="$HOME/.magpie-marvis-native/gateway.json"
+FIX=0
+[ "${1:-}" = "--fix" ] && FIX=1
 
 section() {
   printf '\n============================================================\n'
@@ -189,4 +192,26 @@ printf '%s\n' '  export MARVIS_TRANSPORT=gateway'
 printf '%s\n' '  # 或写入 gateway.json: {"mode":"gateway","url":"http://127.0.0.1:8088/v1","timeoutMs":600000}'
 printf '%s\n' '  # 若错误仍指向 ws://127.0.0.1:10123/，那是 AG-UI WS 通道：设置 MARVIS_WS_MODE=remote 或启动 PC relay。'
 printf '\nDONE\n'
+
+if [ "$FIX" -eq 1 ]; then
+  section '[7] --fix：固化 8088 HTTP 网关配置'
+  PORT=8088
+  if [ -f "$HOME/Marvis-proxy-public/config.json" ] && have python3; then
+    PORT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1],encoding="utf-8")).get("port",8088))' "$HOME/Marvis-proxy-public/config.json" 2>/dev/null || echo 8088)
+  fi
+  URL="http://127.0.0.1:$PORT/v1"
+  mkdir -p "$HOME/.magpie-marvis-native"
+  cat > "$GW_JSON" <<EOF
+{
+  "schemaVersion": 1,
+  "mode": "gateway",
+  "url": "$URL",
+  "key": "",
+  "timeoutMs": 600000
+}
+EOF
+  printf 'WROTE  : %s\n' "$GW_JSON"
+  printf 'URL    : %s\n' "$URL"
+  printf '%s\n' '下一步：若 8088 未监听，先在网关目录执行 sh run.sh start；再执行 magpie provider test。'
+fi
 exit 0
