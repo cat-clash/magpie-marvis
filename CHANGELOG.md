@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.7.7 — 2026-11-25
+
+- **撤掉登录菜单里的「账号管理」入口**：0.7.6 加的入口位置不对 —— 没登录时没账号可管，已登录的账号又不会去登录菜单里找「移除」。删掉 `src/marvis/account-manager.mjs` 与 `methods()` 手机分支的 `accountManagerMethod()`；账号管理仍走 Termux CLI：`node scripts/cli.mjs accounts list/logout/remove`（`--json`/`--verbose`、备份、幂等、歧义保护全保留），共享语义层 `src/marvis/accounts-store.mjs` 保留。
+- **微信登录加「分享到微信（推荐）」主路径**：微信没有 QQ `mqqapi://forward/url?url=…` 那种能带网址的唤起协议（`weixin://` 只能开 App），上一版「唤起微信后没后续」。现在页面首选按钮调 `navigator.share({url:authUrl})` 直接把授权链接送进 Android 系统分享面板 → 选微信 → 文件传输助手 → 发送 → 微信里点开 →「确认授权」→「允许」；页面新增**初始可见**的 4 步后续块（`wx-next-steps`），把「右上角…复制链接 → 回 magpie 粘贴 Code」写清楚。不支持分享/分享取消时回退到 `copyWxUrl()` + `weixin://`（旧按钮全保留）。QQ 分支零改动。
+- **手机 503 从「连不上」变成「照着做」**：`callUpstream` 的 catch 分支以前只回一句「连不上 Marvis 网关」，正是手机 openclaw WS 连 PC 端口 `ws://127.0.0.1:10123/` 失败时用户唯一看到的话。现在诊断按平台分流：手机明确告诉你「10123 是 PC 客户端端口，手机没有这个进程」，并给出 `sh ~/.magpie-marvis-native/magpie-marvis-diag.sh --fix`（写 `gateway.json` + 拉起本地 8088 网关）；桌面提示确认 PC 客户端或设 `MARVIS_WS_MODE=off`。响应体带 `error.diagnosis_hint`/`diagnose_command`，header `x-marvis-diagnosis: openclaw-10123-unreachable`。诊断纯函数在 `src/marvis/failure-hints.mjs`，新增 `tests/failure-hints.test.mjs` 10 例。
+- **电脑端 4100404 风控自动 WS 回退**：以前命中 HTTP uskey 节奏风控只回 429 并叫用户手动设 `MARVIS_WS_MODE=remote`。现在桌面且本机 10123 relay 可达（1s TCP 探针）时**自动用 WS 重试一次**：成功直接返回 WS 响应；失败则在 429 文案里说清原因与下一步（含 `MARVIS_WS_MODE=relay`/`remote` + handshake 的出路）。手机不自动重试、显式 remote 不覆盖、`MARVIS_RISK_AUTO_WS=0` 可关、`MARVIS_RISK_STATUS=503` 保持旧行为。探针/决策/文案全在 `src/marvis/failure-hints.mjs`（纯函数、可单测）。
+
 ## 0.7.6 — 2026-11-25
 
 - **壳里就能管理账号（含首选账号）**：手机端登录菜单新增「账号管理（取消登录 / 移除账号）」入口

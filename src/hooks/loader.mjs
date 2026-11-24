@@ -24,6 +24,13 @@ import {
 import { localGatewayEnabled, gatewayFetch, gatewayConfig } from "../marvis/localgateway.mjs"
 import { normalizeTools } from "../marvis/tool-schema.mjs"
 import { InvalidImageError, normalizeMessages } from "../marvis/images.mjs"
+import {
+  connectionFailureHint,
+  probeLocalRelay,
+  shouldAutoWsFallback,
+  enhanceRiskMessage,
+} from "../marvis/failure-hints.mjs"
+import { isMobile } from "../marvis/mobile-login.mjs"
 
 /**
  * 上游说「模型不行」的信号 —— 只收**模型级**的，映射成 404（搁置这个模型，不打死账号）。
@@ -805,7 +812,29 @@ export function loaderHook(input, options = {}) {
           if (err instanceof HeaderUnavailable) {
             return errorResponse(503, "header_unavailable", `请求头构造失败：${err.message}`)
           }
-          return errorResponse(503, "upstream_unreachable", `连不上 Marvis 网关：${err?.message ?? err}`)
+          // 0.7.7：连接失败（最常见的就是手机 openclaw WS 连 PC 10123 端口）
+          // 以前只甩一句「连不上」，用户不知道下一步做什么。这里补一条**能直接执行**的诊断：
+          // 手机上指向本地 8088 网关的 diag.sh --fix；桌面上指向 PC 客户端/WS_MODE 出路。
+          const errText = String(err?.message ?? err)
+          const diag = connectionFailureHint({ mobile: isMobile(), errText })
+          const res = errorResponse(503, "upstream_unreachable", `连不上 Marvis 网关：${errText}`, {
+            "x-marvis-diagnosis": diag.header,
+          })
+          let body = {}
+          try {
+            body = await res.json()
+          } catch {
+            body = { error: { type: "upstream_error", code: "upstream_unreachable", message: errText } }
+          }
+          if (!body.error || typeof body.error !== "object") {
+            body = { error: { type: "upstream_error", code: "upstream_unreachable", message: errText } }
+          }
+          body.error.diagnosis_hint = diag.hint
+          body.error.diagnose_command = diag.command
+          return new Response(JSON.stringify(body), {
+            status: 503,
+            headers: { "content-type": "application/json", "x-marvis-diagnosis": diag.header },
+          })
         }
 
         if (response.ok) {
@@ -871,15 +900,67 @@ export function loaderHook(input, options = {}) {
           riskBreaker.record(false)
           const retryAfterSec = Math.max(1, Math.ceil(riskBreaker.retryAfterMs / 1000) || 60)
           const status = Number.parseInt(String(process.env.MARVIS_RISK_STATUS ?? ""), 10) || 429
-          return errorResponse(
-            status,
-            "risk_blocked",
+          const mobile = isMobile()
+          const baseMessage =
             "上游风控拦截：Marvis 的 /v1/chat/completions 会校验 Ual-Access-MarvisExt.uskey "
               + "是否按本次请求上下文（conv / resp / scene / model / nonce / openid）用 Beacon SDK 现算。"
               + "插件已按 bus_info 出票；若连续出现，检查 native/ 的 4 个文件是否齐全、qimei36 是否真实，"
               + "或设置 MARVIS_USKEY_URL 指向外部出票服务。换账号没用，换 IP / UA 也无效 ——"
-              + "改走 MARVIS_WS_MODE=remote（手机会话域，不受此风控影响）。"
-              + `原始返回：${text.slice(0, 300)}`,
+              + `原始返回：${text.slice(0, 300)}`
+
+          // ── 0.7.7：PC 端 4100404 自动 WS 回退 ──────────────────────
+          // HTTP 模型网关被 uskey 节奏风控时，唯一验证可行的路线是绕开 HTTP 走 openclaw WS。
+          // 桌面且本机 Marvis PC 客户端 relay（10123）可达时，自动重试一次：
+          // 成功直接把 WS 响应交回去；失败在 429 文案里说清原因与下一步。
+          // 手机没有 PC 客户端，不自动重试；显式 remote / 用户关掉 / 探针不通都不重试。
+          let probeReachable = false
+          let autoTried = false
+          let autoError = ""
+          const autoEnabled = shouldAutoWsFallback({
+            mobile,
+            mode: String(process.env.MARVIS_WS_MODE ?? ""),
+            autoDisabled: String(process.env.MARVIS_RISK_AUTO_WS ?? "") === "0",
+            riskStatus: status,
+          })
+          if (autoEnabled) {
+            probeReachable = await probeLocalRelay()
+            if (probeReachable) {
+              const savedMode = process.env.MARVIS_WS_MODE
+              try {
+                autoTried = true
+                process.env.MARVIS_WS_MODE = "relay"
+                if (requestJson?.stream) {
+                  const iterator = openclawChatStream(creds, requestJson, { signal: init?.signal })
+                  const first = await iterator.next()
+                  if (!first.done) {
+                    return openclawStreamResponse(requestJson, {
+                      [Symbol.asyncIterator]: async function* () {
+                        yield first.value
+                        yield* iterator
+                      },
+                    })
+                  }
+                  autoError = "WS 通道没有产出任何内容"
+                } else {
+                  const result = await openclawChat(creds, requestJson, { signal: init?.signal })
+                  return openclawResponse(requestJson, result)
+                }
+              } catch (e) {
+                autoError = String(e?.message ?? e).slice(0, 200)
+              } finally {
+                if (savedMode === undefined) delete process.env.MARVIS_WS_MODE
+                else process.env.MARVIS_WS_MODE = savedMode
+              }
+            }
+          } else {
+            // 没进自动回退也要给探针结果，好让文案给出准确的「PC 客户端开没开」提示
+            probeReachable = await probeLocalRelay()
+          }
+
+          return errorResponse(
+            status,
+            "risk_blocked",
+            enhanceRiskMessage(baseMessage, { mobile, probeReachable, autoTried, autoError }),
             { "retry-after": String(retryAfterSec) },
           )
         }

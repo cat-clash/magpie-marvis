@@ -144,24 +144,27 @@ export function wxAppLaunchUrl() {
 }
 
 /**
- * 微信授权提示 —— 手机上的出路是「唤起微信 App + 在微信内打开授权链接」。
+ * 微信授权提示 —— 首选「分享到微信」（Android 系统分享面板），备用「唤起微信 App + 复制授权链接」。
  *
  * `open.weixin.qq.com/connect/qrconnect` 是**网站应用扫码登录**页，系统浏览器打开
  * 只显示二维码，需要另一台设备扫；保存图片再扫的链路微信已收紧，一台手机完成不了。
- * 正确做法：
+ * 正确做法（首选分享，省掉手动复制粘贴）：
+ *   ① 点「分享到微信（推荐）」→ 系统分享面板选「微信」→「文件传输助手」→ 发送；
+ *   ② 在微信里点开这条链接 —— 微信内置浏览器会直接显示「确认授权」页（不是二维码）；
+ *   ③ 点「允许」完成授权。
+ * 备用（浏览器不支持 navigator.share 时）：
  *   ① 点「唤起微信」按钮（`weixin://`）打开微信 App；
  *   ② 点「复制授权链接」，粘贴到微信「文件传输助手」（或任意聊天）并发送；
- *   ③ 在微信里点开这条链接 —— 微信内置浏览器会直接显示「确认授权」页（不是二维码）；
- *   ④ 点「允许」完成授权。
+ *   ③ 同样在微信里点开 →「确认授权」→「允许」。
  * 不再引导保存/识别二维码图片。
  *
  * @returns {string}
  */
 export const WECHAT_OPEN_HINT =
-  "微信授权请直接唤起微信 App 完成，不要再保存二维码图片扫码（一台手机扫不了自己的码）：" +
-  "先点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，" +
-  "在微信里点开它就会弹出「确认授权」页，点「允许」即可。若按钮没反应，长按复制下面链接" +
-  "手动粘贴到微信里打开。"
+  "微信授权首选「分享到微信（推荐）」：点它后在系统分享面板选「微信」→「文件传输助手」→ 发送，" +
+  "在微信里点开链接就会弹出「确认授权」页，点「允许」即可。不要再保存二维码图片扫码（一台手机扫不了自己的码）。" +
+  "备用：点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，" +
+  "在微信里点开它同样弹出「确认授权」页，点「允许」。若按钮没反应，长按复制下面链接手动粘贴到微信里打开。"
 
 /** 手机端页面外壳：中文、移动端 viewport、深色模式友好、不引任何外部资源 */
 function page(title, body) {
@@ -219,11 +222,11 @@ function page(title, body) {
 export function mobileInstructions(loginType) {
   if (loginType === "WX") {
     return [
-      "1) 点上面的「唤起微信」按钮打开微信 App（不要再保存二维码图片扫码）",
-      "2) 点「复制授权链接」，把链接粘贴到微信「文件传输助手」（或任意聊天）并发送",
+      "1) 首选：点「分享到微信（推荐）」→ 分享面板选「微信」→「文件传输助手」→ 发送（不要再保存二维码图片扫码）",
+      "2) 备用：点「唤起微信」打开微信 App，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」（或任意聊天）并发送",
       "3) 在微信里点开这条链接，微信内置浏览器会直接弹出「确认授权」页",
       "4) 点「允许」完成授权，浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
-      "5) 长按地址栏 → 全选 → 复制，把那条地址整条**粘贴到下面的 Code 输入框**提交",
+      "5) 页面可能空白：点微信右上角「…」→「复制链接」（或长按地址栏 → 全选 → 复制），把那条地址整条**粘贴到下面的 Code 输入框**提交",
     ].join("\n")
   }
   return [
@@ -238,15 +241,17 @@ export function mobileInstructions(loginType) {
  * 本地登录页正文。
  *
  * ⚠⚠ 页面上必须有**两个**可点的东西，缺一个这条登录路就废了：
- *   ① 首要按钮 —— QQ 走 mqqapi:// 直接把授权页转发给手机 QQ；微信没有带 URL 的 scheme，
- *      只能 weixin:// 唤起微信本体，授权链接靠下面的「复制授权链接」粘进微信里打开；
+ *   ① 首要按钮 —— QQ 走 mqqapi:// 直接把授权页转发给手机 QQ；微信首选「分享到微信」
+ *      （navigator.share 系统分享面板，直接把授权链接发进微信，省掉手动复制粘贴）；
+ *      微信没有带 URL 的 scheme，weixin:// 唤起微信本体 +「复制授权链接」粘进微信里
+ *      打开保留作回退；
  *   ② 粘贴框 + 「完成登录」按钮 —— 授权完成后浏览器停在一条 yybadaccess 地址上，
  *      用户把它整条贴回来。
  * 上一版只有 (2) 但没让用户知道要来这里开页面；再上一版只有 instructions 文字，
  * 用户连粘贴框都看不到（宿主的 method:"auto" 形态不渲染输入框）。
  * 现在两者都在同一个页面上，且 (1) 是首要动作。
  */
-function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
+export function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
   const isWx = loginType === "WX"
   const name = isWx ? "微信" : "QQ"
   const err = error ? `<p class="bad">${esc(error)}</p>` : ""
@@ -258,6 +263,29 @@ function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
   const primaryAttrs = isWx ? ` onclick="return copyAndGo()"` : ""
   const primaryNote = isWx
     ? `<p class="muted">点下面的按钮：唤起微信 + 同时把授权链接复制到剪贴板（到微信里直接粘贴）。</p>`
+    : ""
+  // 微信首选主按钮：Android 系统分享面板（navigator.share）直接把授权链接发进微信，
+  // 省掉「复制 → 切 App → 找聊天 → 粘贴」的手动步骤。127.0.0.1 是 secure context，
+  // Android Chrome 支持 navigator.share；不支持/分享失败时回退到复制 + 唤起（见 shareWx）。
+  // QQ 分支为空串（不带换行），保证 QQ 页输出一个字节都不变。
+  const shareBtn = isWx
+    ? `<button type="button" onclick="return shareWx()" style="background:#07c160">分享到微信（推荐）</button>
+<p id="wx-share-status" class="muted"></p>
+`
+    : ""
+  // 后续步骤块：初始就可见 —— 用户「唤起微信后不知道干嘛」正是要修的体验问题，
+  // 不能把步骤藏起来等点击。shareWx 成功/回退后只做滚动定位 + 高亮，不做显隐切换。
+  const wxNextSteps = isWx
+    ? `<div id="wx-next-steps" style="border:1px solid #d5d9de;border-radius:10px;padding:2px 14px 8px;margin:16px 0">
+<p class="lead"><strong>接下来怎么做（分享或唤起微信后，都按这里走）：</strong></p>
+<ol>
+  <li>点「分享到微信（推荐）」→ 分享面板选「微信」→ 选「文件传输助手」→ 发送。（若用「唤起微信」：先点「复制授权链接」，到微信「文件传输助手」粘贴发送。）</li>
+  <li>在微信里点开刚发送的链接。</li>
+  <li>出现「确认授权」页 → 点「允许」。</li>
+  <li>跳转后页面可能空白：点微信右上角「…」→「复制链接」，回到 magpie 粘贴到 Code 输入框（或本页下方粘贴框）完成登录。</li>
+</ol>
+<p class="muted">提醒：不要保存二维码图片扫码（一台手机扫不了自己的码）。</p>
+</div>`
     : ""
   const fallback = isWx
     ? `<p class="muted">${esc(WECHAT_OPEN_HINT)}</p>
@@ -295,13 +323,41 @@ function flashCopy(){
   const b=document.getElementById('wx-copy-btn');
   if(b){const t=b.textContent;b.textContent='已复制 ✓';setTimeout(()=>{b.textContent=t},1500)}
 }
+// 「分享到微信」主路径：系统分享面板直接把授权链接发进微信（选微信 → 文件传输助手 → 发送）。
+// authUrl 直接读 wx-auth-url 输入框的 value，不重新拼 URL（页面回显的就是本次授权地址）。
+// 分享失败（用户取消等）静默回退：copyWxUrl() 复制 + 文字提示；不支持 navigator.share
+// 时回退到 copyAndGo 那套（复制 + weixin:// 唤起）。两条路都指向下方后续步骤块。
+function shareWx(){
+  const el=document.getElementById('wx-auth-url');
+  const authUrl=el?el.value:'';
+  if(navigator.share){
+    navigator.share({title:'Marvis 微信授权',text:'在微信里点开这个链接，点「允许」完成授权',url:authUrl}).then(
+      ()=>{setWxShareStatus('已分享 ✓ 按下面「接下来怎么做」继续。');showWxNextSteps()},
+      ()=>{copyWxUrl();setWxShareStatus('分享未完成：已复制授权链接，请打开微信，粘贴到「文件传输助手」发送后点开。');showWxNextSteps()}
+    );
+  }else{
+    copyAndGo();
+    setWxShareStatus('此浏览器不支持系统分享：已复制授权链接并唤起微信，请粘贴到「文件传输助手」发送后点开。');
+    showWxNextSteps();
+    window.location.href='weixin://';
+  }
+  return false;
+}
+function setWxShareStatus(msg){
+  const p=document.getElementById('wx-share-status');
+  if(p)p.textContent=msg;
+}
+function showWxNextSteps(){
+  const box=document.getElementById('wx-next-steps');
+  if(box){box.style.borderColor='#07c160';box.scrollIntoView({behavior:'smooth',block:'nearest'});}
+}
 </script>`
     : ""
 
-  // 第 1 步的说法必须与按钮真实行为一致：微信按钮只唤起微信本体，授权靠复制链接在微信内打开；
-  // 说「点按钮完成授权」会让人以为点完就结束了，卡在第一步。
+  // 第 1 步的说法必须与按钮真实行为一致：分享按钮只把链接发进微信，weixin:// 按钮只唤起
+  // 微信本体，授权都要在微信里点「允许」；说「点按钮完成授权」会让人以为点完就结束了。
   const step1 = isWx
-    ? `第 1 步：点下面的按钮唤起微信，再「复制授权链接」发到微信里打开，点「允许」完成${esc(name)}授权。`
+    ? `第 1 步（推荐）：点「分享到微信（推荐）」，分享面板选微信 →「文件传输助手」发送。备用：点下面的按钮唤起微信，再「复制授权链接」发到微信里打开，点「允许」完成${esc(name)}授权。`
     : `第 1 步：点下面的按钮唤起手机 ${esc(name)} 完成授权（没装 App 就用下面的备用按钮走网页版）。`
 
   return page(
@@ -309,10 +365,10 @@ function flashCopy(){
     `<h1>${esc(name)}登录</h1>
 ${err}
 <p class="lead">${step1}</p>
-<a class="primary" href="${esc(primaryHref)}"${primaryAttrs}>${esc(primaryText)}</a>
+${shareBtn}<a class="primary" href="${esc(primaryHref)}"${primaryAttrs}>${esc(primaryText)}</a>
 ${primaryNote}
 ${fallback}
-
+${wxNextSteps}
 <hr>
 
 <p class="lead">第 2 步：授权完成后浏览器会停在一条 <code>yybadaccess.3g.qq.com/…marvis_oauth?…code=…</code> 的地址上，

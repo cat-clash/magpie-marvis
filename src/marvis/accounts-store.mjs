@@ -1,6 +1,6 @@
 // accounts-store.mjs —— plugin-auth.json 账号读写的**唯一语义层**
 //
-// CLI（scripts/accounts.mjs）与手机端「账号管理」页（src/marvis/account-manager.mjs）
+// CLI（scripts/accounts.mjs）共享的账号语义层（0.7.7 起壳内管理页入口已移除，只留 CLI）
 // 共用这里的同一套规矩：选择器优先级、logout/remove 的精确字段形状、
 // 乐观并发检查、备份 + 原子写。改语义只改这里，别在两个入口各写一份。
 //

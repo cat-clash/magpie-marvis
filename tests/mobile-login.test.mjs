@@ -408,15 +408,6 @@ test("methods：手机环境 —— 三个入口都在（QQ / 微信 / 浏览器
         "手机端必须有「浏览器 · 粘贴回调地址」入口",
       )
 
-      // 0.7.6：账号管理入口 —— 壳对首选账号不渲染移除按钮，插件在登录菜单里补一个
-      const mgr = list.find((m) => /账号管理/.test(m.label))
-      assert.ok(mgr, "手机端必须有「账号管理（取消登录 / 移除账号）」入口")
-      const mr = await mgr.authorize()
-      await mr.cancel?.()
-      assert.match(mr.url, /^http:\/\/127\.0\.0\.1:\d+\//, "账号管理必须打开本机管理页")
-      assert.match(mr.instructions, /取消登录/)
-      assert.match(mr.instructions, /移除/)
-
       // 手机上没有 Windows 进程可读 —— 「从本机导入」不该出现
       assert.equal(
         list.some((m) => /从本机 Marvis 导入/.test(m.label)),
