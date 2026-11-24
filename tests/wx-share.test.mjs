@@ -15,7 +15,7 @@ import { formPage, WECHAT_OPEN_HINT, mobileInstructions } from "../src/marvis/mo
 
 const TOKEN = "0".repeat(32)
 const WX_AUTH_URL =
-  "https://open.weixin.qq.com/connect/oauth2/authorize?appid=wxTESTAPPID&redirect_uri=https%3A%2F%2Fyybadaccess.3g.qq.com%2Fmarvis_client_login%2Fmarvis_oauth%3Flogin_type%3DWX&response_type=code&scope=snsapi_userinfo&state=" +
+  "https://open.weixin.qq.com/connect/oauth2/authorize?appid=wxTESTAPPID&redirect_uri=https%3A%2F%2Fyybadaccess.3g.qq.com%2Fmarvis_client_login%2Fmarvis_oauth%3Flogin_type%3DWX&response_type=code&scope=snsapi_base&state=" +
   "8".repeat(32) +
   "#wechat_redirect"
 const QQ_AUTH_URL = "https://graph.qq.com/oauth2.0/authorize?display=mobile&client_id=1903794758"
@@ -77,7 +77,7 @@ test("微信页：步骤块是 4 步 ordered list，覆盖分享到登录全链�
   for (const kw of [
     "分享到微信",
     "文件传输助手",
-    "确认授权",
+    "跳转授权",
     "允许",
     "右上角",
     "复制链接",
@@ -111,8 +111,8 @@ test("微信页：weixin:// 唤起、copyWxUrl、copyAndGo、wx-copy-btn 全保�
 
 test("微信页：授权输入框回显网页授权地址（oauth2/authorize，不是扫码页）", () => {
   assert.match(wxHtml, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "回显网页授权链接")
-  assert.match(wxHtml, /scope=snsapi_userinfo/)
-  assert.doesNotMatch(wxHtml, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect/, "不许回显扫码页")
+  assert.match(wxHtml, /scope=snsapi_base/, "必须 base（userinfo 会 10005）")
+  assert.doesNotMatch(wxHtml, /id="wx-auth-url"[^>]*value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect/, "主授权框不许回显扫码页")
 })
 
 test("微信页：带 error 重渲染时分享主路径与步骤块仍在（可重试）", () => {
@@ -141,16 +141,16 @@ test("WECHAT_OPEN_HINT：分享列为首选，旧关键词（唤起微信/复制
   assert.match(WECHAT_OPEN_HINT, /复制授权链接/)
   assert.match(WECHAT_OPEN_HINT, /不要.*二维码/)
   assert.match(WECHAT_OPEN_HINT, /一台手机扫不了自己的码/)
-  assert.match(WECHAT_OPEN_HINT, /确认授权/)
-  assert.match(WECHAT_OPEN_HINT, /允许/)
+  assert.match(WECHAT_OPEN_HINT, /跳转授权/, "base 静默授权：文案要说跳转，而不是弹确认页")
+  assert.match(WECHAT_OPEN_HINT, /10005/, "必须写明 10005 的应对")
   // 首选必须是分享：分享要出现在「备用」之前
   assert.ok(WECHAT_OPEN_HINT.indexOf("分享到微信") < WECHAT_OPEN_HINT.indexOf("备用"))
 })
 
-test("mobileInstructions(WX)：5 步结构不变，第 1 步是分享，旧关键词全保留", () => {
+test("mobileInstructions(WX)：6 步结构，第 1 步是分享，旧关键词全保留", () => {
   const s = mobileInstructions("WX")
   const lines = s.split("\n")
-  assert.equal(lines.length, 5, "必须仍是 5 步")
+  assert.equal(lines.length, 6, "现在是 6 步（新增 10005 应对）")
   assert.match(lines[0], /分享到微信/, "首选路径放第 1 步")
   assert.match(s, /唤起微信/)
   assert.match(s, /复制授权链接/)

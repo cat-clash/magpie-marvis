@@ -3,8 +3,8 @@
 // 覆盖「手机点 QQ / 微信登录唤不起」的三个根因对应的修复：
 //   ① QQ 授权页在手机上必须是 display=mobile（否则渲染 PC 表单，不唤起 App）
 //   ② 微信是 PC 扫码页，instructions 与登录页必须教「唤起微信 App + 复制授权链接到微信里打开」
-//      0.7.8 起手机端微信授权链接改用「网页授权」(oauth2/authorize + snsapi_userinfo)：
-//      在微信内打开直接弹确认页，一台手机完成；qrconnect 只作桌面备用。
+//      0.7.8 起手机端微信授权链接改用「网页授权」(oauth2/authorize + snsapi_base)：
+//      在微信内打开直接跳回带 code，一台手机完成；0.7.9 修 10005（userinfo→base）。
 //   ③ 壳的粘贴补丁按包名打，本插件包名不匹配 → 自带 127.0.0.1 表单页，不依赖壳
 //
 // 跑法：node --test tests/mobile-login.test.mjs
@@ -13,7 +13,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 
 import { isMobile, mobileInstructions, startPasteServer, mobileOauthLogin } from "../src/marvis/mobile-login.mjs"
-import { authorizeUrl, wxWebAuthUrl, extractCode, stateOf } from "../src/marvis/login.mjs"
+import { authorizeUrl, wxWebAuthUrl, wxQrLoginUrl, extractCode, stateOf } from "../src/marvis/login.mjs"
 
 /** 与真实换取同形的回调地址（不联网：只测到 code/state 解析与表单流程） */
 function fakeCallback(code = "ABCDEF1234567890abcdef", state = "31.1177412") {
@@ -88,15 +88,22 @@ test("authorizeUrl：微信两条路都不加 display（qrconnect 没有这个�
   }
 })
 
-test("wxWebAuthUrl：微信网页授权走 oauth2/authorize + snsapi_userinfo + #wechat_redirect（手机一台完成，不扫码）", () => {
+test("wxWebAuthUrl：微信网页授权走 oauth2/authorize + snsapi_base + #wechat_redirect（userinfo 会 10005）", () => {
   const u = new URL(wxWebAuthUrl("e".repeat(32)))
   assert.equal(u.host, "open.weixin.qq.com")
   assert.equal(u.pathname, "/connect/oauth2/authorize", "必须是网页授权，不是 qrconnect")
-  assert.equal(u.searchParams.get("scope"), "snsapi_userinfo", "弹确认授权页的 scope")
+  assert.equal(u.searchParams.get("scope"), "snsapi_base", "必须 base：userinfo 真机报 10005（公众号未认证）")
   assert.equal(u.searchParams.get("response_type"), "code")
   assert.equal(u.searchParams.get("state"), "e".repeat(32), "state 原样回传 guid")
   assert.match(u.searchParams.get("redirect_uri"), /marvis_oauth\?login_type=WX$/, "回调仍带 login_type=WX")
   assert.ok(u.hash.endsWith("#wechat_redirect"), "必须有 #wechat_redirect（微信内跳转标记）")
+})
+
+test("wxQrLoginUrl：扫码备用仍是 qrconnect + snsapi_login（另一台设备扫）", () => {
+  const u = new URL(wxQrLoginUrl("f".repeat(32)))
+  assert.equal(u.pathname, "/connect/qrconnect")
+  assert.equal(u.searchParams.get("scope"), "snsapi_login")
+  assert.equal(u.searchParams.get("state"), "f".repeat(32))
 })
 
 test("mobileOauthLogin：微信 authorize 走网页授权链接（不是 qrconnect），放进本地页的授权框", async () => {
@@ -113,7 +120,7 @@ test("mobileOauthLogin：微信 authorize 走网页授权链接（不是 qrconne
   const r = await m.authorize()
   // 0.7.8：本地页里回显的授权链接必须是网页授权，微信内打开直接弹确认页
   assert.match(passedAuthUrl, /open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "授权链接必须是网页授权")
-  assert.match(passedAuthUrl, /scope=snsapi_userinfo/)
+  assert.match(passedAuthUrl, /scope=snsapi_base/, "必须 base（userinfo 会 10005）")
   assert.doesNotMatch(passedAuthUrl, /qrconnect/, "不许再用扫码页")
   assert.match(passedAuthUrl, /#wechat_redirect$/, "必须带微信内跳转标记")
   // 壳打开的仍是本机引导页（拿按钮 + 粘贴框）
@@ -562,10 +569,12 @@ test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", a
 test("本地登录页：微信页给「唤起微信 + 复制授权链接」，不用假的 scheme", async () => {
   const { startPasteServer } = await import("../src/marvis/mobile-login.mjs")
   const authUrl = wxWebAuthUrl("8".repeat(32))
+  const qrAuthUrl = wxQrLoginUrl("8".repeat(32))
   const s = await startPasteServer({
     loginType: "WX",
     guid: "8".repeat(32),
     authorizeUrl: authUrl,
+    qrAuthUrl,
     port: 0,
     timeoutMs: 5000,
   })
@@ -590,6 +599,9 @@ test("本地登录页：微信页给「唤起微信 + 复制授权链接」，�
     assert.match(html, /function copyAndGo\(/, "copyAndGo 脚本本体必须在页面里")
     assert.match(html, /同时把授权链接复制到剪贴板/, "要把「顺手复制」这件事写在按钮旁边")
     assert.match(html, /<textarea/, "同样要有粘贴框")
+    assert.match(html, /id="wx-qr-url"/, "必须给扫码备用链接（网页授权被拒时的退路）")
+    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect\?/, "扫码链接必须是 qrconnect")
+    assert.match(html, /10005/, "必须写明 10005 这个真实错误码的应对")
   } finally {
     s.close()
   }

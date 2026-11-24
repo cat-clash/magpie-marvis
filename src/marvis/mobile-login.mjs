@@ -28,11 +28,14 @@
 // 1. **微信授权页是 PC 扫码页，但扫码不是手机上的出路**
 //    `open.weixin.qq.com/connect/qrconnect?scope=snsapi_login` 是「网站应用扫码登录」，
 //    系统浏览器打开它只显示二维码 —— 需要**另一台设备**来扫；一台手机完成不了「扫自己的码」，
-//    保存二维码图片再扫的链路微信已逐步收紧。
-//    → 手机上的正确出路是**唤起微信 App，把授权链接在微信内置浏览器里打开**：微信内置
-//      浏览器打开 qrconnect 链接时不会显示二维码，而是直接弹「确认授权」页（微信自己有
-//      登录态）。所以 instructions 的核心动作是「唤起微信 + 复制链接到微信里打开」，
-//      **不再教保存/识别二维码**。扫码只作为系统浏览器打开后的极端兜底。
+//    保存二维码图片再扫的链路微信已收紧（用户截图实测：「不支持长按/相册识别」）。
+//    → 0.7.9 起手机上的正确出路是**公众号网页授权**：
+//      `connect/oauth2/authorize?scope=snsapi_base#wechat_redirect`，
+//      在微信内置浏览器里打开后直接跳回 redirect_uri 带 code（静默，不弹确认页、不扫码）。
+//      ⚠ scope 不能用 snsapi_userinfo：真机报「此公众号并没有这些scope的权限，错误码:10005」
+//      （公众号未认证没该权限）；base 是所有公众号默认具备的，且我们只要 code 不要昵称。
+//    → instructions 的核心动作是「分享到微信 / 复制授权链接到微信里打开」；
+//      若网页授权仍被拒，页面底部给 qrconnect 扫码链接（需另一台设备或电脑）。
 //    ⚠ 微信没有 QQ 那种 `mqqapi://forward/url`（携带任意 URL 唤起 App 授权）的通用
 //      scheme；`weixin://` 只能唤起微信本体，授权页地址要靠用户复制到微信里打开。
 //
@@ -63,7 +66,7 @@
 import { createServer } from "node:http"
 import { randomBytes } from "node:crypto"
 
-import { authorizeUrl, wxWebAuthUrl, extractCode, stateOf, parseCallback, pastedInputOf } from "./login.mjs"
+import { authorizeUrl, wxWebAuthUrl, wxQrLoginUrl, extractCode, stateOf, parseCallback, pastedInputOf } from "./login.mjs"
 
 /** 本地表单页默认端口；被占用时自动退到随机端口 */
 export const DEFAULT_PASTE_PORT = 4618
@@ -132,9 +135,8 @@ export function qqAppLaunchUrl(authorizeUrl) {
 /**
  * 唤起微信的链接 —— 微信没有「带 URL 唤起微信授权」的通用 scheme。
  *
- * `weixin://` 只能唤起微信 App 本体；授权页地址（qrconnect）要用户复制后
- * 在微信内置浏览器里打开 —— 那里面打开 qrconnect 不会显示二维码，而是直接
- * 弹「确认授权」页（微信自己带登录态），一台手机就能完成。
+ * `weixin://` 只能唤起微信 App 本体；网页授权链接要用户复制后在微信内置浏览器里打开 ——
+ * 那里面打开 `oauth2/authorize?scope=snsapi_base` 会静默跳回回调带 code（不弹确认页、不扫码）。
  * 页面必须同时给「复制授权链接」按钮，否则用户唤起微信后不知道去哪找链接。
  *
  * @returns {string}
@@ -146,25 +148,28 @@ export function wxAppLaunchUrl() {
 /**
  * 微信授权提示 —— 首选「分享到微信」（Android 系统分享面板），备用「唤起微信 App + 复制授权链接」。
  *
- * `open.weixin.qq.com/connect/qrconnect` 是**网站应用扫码登录**页，系统浏览器打开
- * 只显示二维码，需要另一台设备扫；保存图片再扫的链路微信已收紧，一台手机完成不了。
+ * `qrconnect` 是**网站应用扫码登录**页，系统浏览器打开只显示二维码，需要另一台设备扫；
+ * 保存图片再扫的链路微信已收紧，一台手机完成不了。0.7.9 起主链接改用**公众号网页授权**
+ * `oauth2/authorize?scope=snsapi_base#wechat_redirect`（微信内打开静默跳回带 code）。
  * 正确做法（首选分享，省掉手动复制粘贴）：
  *   ① 点「分享到微信（推荐）」→ 系统分享面板选「微信」→「文件传输助手」→ 发送；
- *   ② 在微信里点开这条链接 —— 微信内置浏览器会直接显示「确认授权」页（不是二维码）；
- *   ③ 点「允许」完成授权。
+ *   ② 在微信里点开这条链接 —— 直接跳转授权（可能一闪而过）；
+ *   ③ 跳转后复制 `yybadaccess…` 回调地址粘贴回 magpie。
  * 备用（浏览器不支持 navigator.share 时）：
  *   ① 点「唤起微信」按钮（`weixin://`）打开微信 App；
  *   ② 点「复制授权链接」，粘贴到微信「文件传输助手」（或任意聊天）并发送；
- *   ③ 同样在微信里点开 →「确认授权」→「允许」。
+ *   ③ 同样在微信里点开，跳转后复制回调地址。
+ * ⚠ scope 必须是 snsapi_base：snsapi_userinfo 真机报 10005（公众号未认证没该权限）。
+ * 若网页授权仍被拒（10005），页面底部还有 qrconnect 扫码链接（需另一台设备/电脑）。
  * 不再引导保存/识别二维码图片。
  *
  * @returns {string}
  */
 export const WECHAT_OPEN_HINT =
   "微信授权首选「分享到微信（推荐）」：点它后在系统分享面板选「微信」→「文件传输助手」→ 发送，" +
-  "在微信里点开链接就会弹出「确认授权」页，点「允许」即可。这是微信「网页授权」，必须在微信里打开（不要用系统浏览器直接开这个链接）；一台手机全程完成，不用扫码，也不要保存二维码图片（一台手机扫不了自己的码）。" +
-  "备用：点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，" +
-  "在微信里点开它同样弹出「确认授权」页，点「允许」。若按钮没反应，长按复制下面链接手动粘贴到微信里打开。"
+  "在微信里点开链接就会直接跳到授权（网页授权，可能一闪而过）。这是微信「网页授权」，必须在微信里打开（不要用系统浏览器直接开这个链接）；一台手机全程完成，不用扫码，也不要保存二维码图片（一台手机扫不了自己的码）。" +
+  "备用：点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，在微信里点开它同样会跳转授权。" +
+  "若微信提示「该公众号没有这些scope的权限 / 错误码 10005」或页面打不开，用页面最下面的**扫码链接**（需要另一台设备扫，或让电脑打开）。"
 
 /** 手机端页面外壳：中文、移动端 viewport、深色模式友好、不引任何外部资源 */
 function page(title, body) {
@@ -224,9 +229,10 @@ export function mobileInstructions(loginType) {
     return [
       "1) 首选：点「分享到微信（推荐）」→ 分享面板选「微信」→「文件传输助手」→ 发送（不要再保存二维码图片扫码）",
       "2) 备用：点「唤起微信」打开微信 App，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」（或任意聊天）并发送",
-      "3) 在微信里点开这条链接，微信内置浏览器会直接弹出「确认授权」页",
-      "4) 点「允许」完成授权，浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
+      "3) 在微信里点开这条链接，微信内置浏览器会直接跳转授权（网页授权，可能一闪而过；出现授权页就点「允许」）",
+      "4) 跳转后浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
       "5) 页面可能空白：点微信右上角「…」→「复制链接」（或长按地址栏 → 全选 → 复制），把那条地址整条**粘贴到下面的 Code 输入框**提交",
+      "6) 若微信提示「该公众号没有这些scope的权限 / 错误码 10005」，说明网页授权走不通，改用本页最下面的扫码链接（需另一台设备或电脑打开）",
     ].join("\n")
   }
   return [
@@ -251,7 +257,7 @@ export function mobileInstructions(loginType) {
  * 用户连粘贴框都看不到（宿主的 method:"auto" 形态不渲染输入框）。
  * 现在两者都在同一个页面上，且 (1) 是首要动作。
  */
-export function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
+export function formPage({ loginType, token, error, authorizeUrl: authUrl, qrAuthUrl = "" }) {
   const isWx = loginType === "WX"
   const name = isWx ? "微信" : "QQ"
   const err = error ? `<p class="bad">${esc(error)}</p>` : ""
@@ -281,10 +287,10 @@ export function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
 <ol>
   <li>点「分享到微信（推荐）」→ 分享面板选「微信」→ 选「文件传输助手」→ 发送。（若用「唤起微信」：先点「复制授权链接」，到微信「文件传输助手」粘贴发送。）</li>
   <li>在微信里点开刚发送的链接。</li>
-  <li>出现「确认授权」页 → 点「允许」。</li>
+  <li>微信会直接跳转授权（网页授权，可能一闪而过；若出现授权页就点「允许」）。</li>
   <li>跳转后页面可能空白：点微信右上角「…」→「复制链接」，回到 magpie 粘贴到 Code 输入框（或本页下方粘贴框）完成登录。</li>
 </ol>
-<p class="muted">提醒：不要保存二维码图片扫码（一台手机扫不了自己的码）。</p>
+<p class="muted">提醒：不要保存二维码图片扫码（一台手机扫不了自己的码）。若微信提示 10005（没有这些 scope 权限），改用页面最下面的扫码链接，需要另一台设备。</p>
 </div>`
     : ""
   const fallback = isWx
@@ -292,7 +298,9 @@ export function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
        <p class="muted">复制授权链接（唤起微信后，粘贴到微信「文件传输助手」点开）：</p>
        <input type="text" id="wx-auth-url" readonly value="${esc(authUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#fff;color:inherit;font:13px/1.4 ui-monospace,monospace">
        <button type="button" id="wx-copy-btn" onclick="copyWxUrl()">复制授权链接</button>
-        <p class="muted">这条是微信「网页授权」链接，必须在微信里打开才会弹确认授权页；系统浏览器直接打开只会看到「请在微信客户端打开链接」。请用上面的「分享到微信」，或复制后粘贴到微信「文件传输助手」打开。</p>`
+        <p class="muted">这条是微信「网页授权」链接，必须在微信里打开才会跳转授权；系统浏览器直接打开只会看到「请在微信客户端打开链接」。请用上面的「分享到微信」，或复制后粘贴到微信「文件传输助手」打开。</p>
+        ${qrAuthUrl ? `<p class="muted" style="margin-top:18px">万一微信提示「没有这些scope的权限 / 错误码 10005」或打不开，用这个扫码链接（需要另一台设备扫，或让电脑打开）：</p>
+        <input type="text" id="wx-qr-url" readonly value="${esc(qrAuthUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#fff;color:inherit;font:13px/1.4 ui-monospace,monospace">` : ""}`
     : `<p class="muted">没装手机 QQ 时，用下面的按钮在浏览器里完成网页版登录：<br>
        <a class="alt" href="${esc(authUrl)}" target="_blank" rel="noreferrer">用浏览器打开 QQ 授权页</a></p>`
 
@@ -420,6 +428,7 @@ export async function startPasteServer({
   loginType = "QC",
   guid,
   authorizeUrl: authUrl = "",
+  qrAuthUrl = "",
   port = DEFAULT_PASTE_PORT,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   signal,
@@ -455,7 +464,7 @@ export async function startPasteServer({
 
     if (url.pathname !== "/" && url.pathname !== "/submit") return send(404, page("404", "<h1>没有这个页面</h1>"))
 
-    if (req.method === "GET") return send(200, formPage({ loginType, token, authorizeUrl: authUrl }))
+    if (req.method === "GET") return send(200, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl }))
 
     if (req.method !== "POST") return send(405, page("405", "<h1>不支持的方法</h1>"))
 
@@ -463,16 +472,16 @@ export async function startPasteServer({
     try {
       body = await readBody(req)
     } catch (err) {
-      return send(413, formPage({ loginType, token, authorizeUrl: authUrl, error: String(err?.message ?? err) }))
+      return send(413, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: String(err?.message ?? err) }))
     }
 
     // 表单是 application/x-www-form-urlencoded
     const form = new URLSearchParams(body)
     if (form.get("t") !== token) {
-      return send(403, formPage({ loginType, token, authorizeUrl: authUrl, error: "这个页面已经失效，请回 magpie 重新点一次登录。" }))
+      return send(403, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: "这个页面已经失效，请回 magpie 重新点一次登录。" }))
     }
     const pasted = String(form.get("callback") ?? "").trim()
-    if (!pasted) return send(400, formPage({ loginType, token, authorizeUrl: authUrl, error: "没有收到内容，请把地址栏那条地址粘贴进来。" }))
+    if (!pasted) return send(400, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: "没有收到内容，请把地址栏那条地址粘贴进来。" }))
     if (!extractCode(pasted)) {
       return send(
         400,
@@ -486,7 +495,7 @@ export async function startPasteServer({
 
     const state = stateOf(pasted)
     if (!state) {
-      return send(400, formPage({ loginType, token, authorizeUrl: authUrl, error: "粘贴的内容里没有 state，请重新复制地址栏那条完整地址。" }))
+      return send(400, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: "粘贴的内容里没有 state，请重新复制地址栏那条完整地址。" }))
     }
 
     try {
@@ -505,7 +514,7 @@ export async function startPasteServer({
     } catch (err) {
       // 换取失败（网络抖动 / code 已被消费）：允许用户在同一页面重试一次
       const msg = String(err?.message ?? err)
-      send(502, formPage({ loginType, token, authorizeUrl: authUrl, error: msg.slice(0, 300) }))
+      send(502, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: msg.slice(0, 300) }))
     }
   })
 
@@ -623,16 +632,19 @@ export function mobileOauthLogin({
       // 每个账号一个独立 guid —— 与桌面路径同一套虚拟设备机制，避免新号顶掉旧号
       const { newDeviceGuid } = await import("./device.mjs")
       const guid = newDeviceGuid()
-      // ⚠ 微信手机端必须用「网页授权」（oauth2/authorize + snsapi_userinfo + #wechat_redirect）：
-      //   在微信内置浏览器打开会直接弹「确认授权」页，一台手机全程完成。
+      // ⚠ 微信手机端必须用「网页授权」（oauth2/authorize + snsapi_base + #wechat_redirect）：
+      //   在微信内置浏览器打开直接跳回带 code，一台手机全程完成。
       //   旧的 qrconnect 是扫码页，手机上看到一张自己扫不了的二维码（用户实测卡死）。
+      //   scope 必须是 snsapi_base：snsapi_userinfo 真机实测报 10005（公众号未认证没该权限）。
       //   QQ 仍用 graph.qq.com display=mobile（系统浏览器触发 mqqapi 唤起）。
       //   state=guid 两条路都一样，回调 parseCallback 靠它认回设备，换取端不挑 scope。
       const authUrl =
         loginType === "WX" ? wxWebAuthUrl(guid) : authorizeUrl(loginType, guid, { mobile: true })
+      // 扫码备用：网页授权若被微信拒（10005 等），还有一条「另一台设备扫」的退路
+      const qrAuthUrl = loginType === "WX" ? wxQrLoginUrl(guid) : ""
 
       // 本地登录页作为兜底（壳没给输入框时用户仍能走通）：必须在 authorize() 里就起来
-      const paste = await startServer({ loginType, guid, authorizeUrl: authUrl, timeoutMs })
+      const paste = await startServer({ loginType, guid, authorizeUrl: authUrl, qrAuthUrl, timeoutMs })
       try {
         onPage?.(paste.url)
       } catch {

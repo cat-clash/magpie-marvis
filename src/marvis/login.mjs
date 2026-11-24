@@ -60,17 +60,7 @@ const REDIRECT = `${BASE}/marvis_client_login/marvis_oauth`
  */
 export function authorizeUrl(loginType, guid, opts = {}) {
   const mobile = opts.mobile === true
-  if (loginType === "WX") {
-    const p = new URLSearchParams({
-      appid: WX_APP_ID,
-      // ⚠ 同样必须带 ?login_type=WX
-      redirect_uri: `${REDIRECT}?login_type=${loginType}`,
-      response_type: "code",
-      scope: "snsapi_login",
-      state: guid,
-    })
-    return `https://open.weixin.qq.com/connect/qrconnect?${p}`
-  }
+  if (loginType === "WX") return wxQrLoginUrl(guid)
   // QQ：which=Login 是 Marvis 客户端用的参数，别省；display 随平台切换（见上）
   const p = new URLSearchParams({
     which: "Login",
@@ -87,23 +77,45 @@ export function authorizeUrl(loginType, guid, opts = {}) {
 }
 
 /**
- * 微信「网页授权」入口（0.7.8 新增）—— 手机端必须用这个，不是 qrconnect。
+ * 微信「网站应用扫码登录」入口（qrconnect，最老的实现方式）。
+ *
+ * 授权页就是一张二维码，需要**另一台设备**的微信来扫。桌面端正常用这个；
+ * 手机端一台设备扫不了自己的屏，只作为「有第二台设备时」的备用。
+ *
+ * @param {string} guid 设备 guid（微信的 state 就是它）
+ * @returns {string}
+ */
+export function wxQrLoginUrl(guid) {
+  const p = new URLSearchParams({
+    appid: WX_APP_ID,
+    // ⚠ 同样必须带 ?login_type=WX
+    redirect_uri: `${REDIRECT}?login_type=WX`,
+    response_type: "code",
+    scope: "snsapi_login",
+    state: guid,
+  })
+  return `https://open.weixin.qq.com/connect/qrconnect?${p}`
+}
+
+/**
+ * 微信「网页授权」入口（0.7.8 新增，0.7.9 修正 scope）—— 手机端优先用这个。
  *
  * ⚠⚠ 两种微信登录的本质区别（实测，别再混用）：
  *   · `connect/qrconnect`（snsapi_login）= **网站应用扫码登录**。授权页是一张二维码，
  *     设计给「PC 显示二维码 + 另一台手机的微信扫」。在手机浏览器/微信里打开，
- *     看到的还是那张码 —— 一台手机扫不了自己屏幕上的码（用户截图实测卡死在这）。
- *   · `connect/oauth2/authorize`（snsapi_userinfo）= **公众号网页授权**。在微信内置
- *     浏览器里打开会**直接弹「确认授权」页**，点「允许」后跳回 redirect_uri 带 code，
- *     一台手机全程完成，无需扫码。这正是手机端要的。
+ *     看到的还是那张码 —— 一台手机扫不了自己屏幕上的码。
+ *   · `connect/oauth2/authorize` = **公众号网页授权**。在微信内置浏览器里打开后
+ *     直接跳回 redirect_uri 带 code（base 静默）或先弹确认页（userinfo），无需扫码。
  *
- * 实测（MicroMessenger UA + 本 appid wxb650708317d56f88）：
- *   · oauth2/authorize → 301 → 标准网页授权入口「请在微信客户端打开链接」（参数被接受）；
- *   · qrconnect        → 200 → 二维码页（问题根源）。
+ * ⚠⚠ 0.7.9 真机实测踩坑：`scope=snsapi_userinfo` 会被微信拒，弹
+ *   「此公众号并没有这些scope的权限，错误码:10005」——
+ *   10005 的含义是**公众号未认证**，而 snsapi_userinfo 需要已认证服务号才有。
+ *   但 `snsapi_base` 是**所有公众号默认具备**的权限（无需认证），
+ *   而且我们只需要 code 去 Marvis 服务端换登录态（不要昵称头像），
+ *   base 完全够用 → 改用 snsapi_base。
  *
- * 关键：`#wechat_redirect` 不能省 —— 微信靠这个 fragment 判断在内置浏览器里静默跳转；
- * 少了它即使在微信里也只显示提示页。scope 用 snsapi_userinfo（弹确认页，能拿 openid）：
- * 换取端 parseCallback → exchangeCode 只用 code + guid，不挑 scope，所以能直接复用。
+ * 关键：`#wechat_redirect` 不能省 —— 微信靠这个 fragment 判断在内置浏览器里跳转。
+ * 换取端 parseCallback → exchangeCode 只用 code + guid，不挑 scope，直接复用。
  *
  * @param {string} guid 设备 guid（state 原样回传，微信的 state 就是它）
  * @returns {string}
@@ -113,7 +125,8 @@ export function wxWebAuthUrl(guid) {
     appid: WX_APP_ID,
     redirect_uri: `${REDIRECT}?login_type=WX`,
     response_type: "code",
-    scope: "snsapi_userinfo",
+    // ⚠ snsapi_base（不是 userinfo）：userinfo 会 10005（公众号未认证没这个权限）
+    scope: "snsapi_base",
     state: guid,
   })
   return `https://open.weixin.qq.com/connect/oauth2/authorize?${p}#wechat_redirect`

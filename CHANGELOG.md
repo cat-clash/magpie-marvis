@@ -1,5 +1,21 @@
 # 更新记录
 
+## 0.7.9 — 2026-11-25
+
+- **修 0.7.8 的真机报错：微信网页授权 scope 改 `snsapi_base`**。0.7.8 把手机微信登录从
+  `qrconnect`（扫码页）改成了公众号网页授权，方向对，但 scope 用了 `snsapi_userinfo`，
+  真机在微信里点开链接直接弹：**「微信登录失败：此公众号并没有这些scope的权限，错误码:10005」**。
+  10005 表示公众号未认证、没有 userinfo 权限；而 `snsapi_base` 是所有公众号默认具备的（无需认证），
+  且我们只需要 code 去 Marvis 服务端换登录态（不需要昵称头像），base 完全够用 →
+  `wxWebAuthUrl()` 的 scope 改为 `snsapi_base`。base 是静默授权：在微信里打开后**直接跳回**
+  `redirect_uri?code=…`（不再弹确认页），页面文案随之改写（「直接跳转授权」而不是「点允许」）。
+- **新增扫码备用链接**：万一网页授权仍被微信拒，本地登录页底部给出 `qrconnect` 扫码链接
+  （`#wx-qr-url`，另一台设备或电脑打开来扫），并写明 10005 的应对。移动端 instructions 从 5 步增到 6 步。
+- 抽出 `wxQrLoginUrl(guid)`（qrconnect 扫码），`authorizeUrl("WX", guid)` 改为复用它；
+  `formPage` / `startPasteServer` 新增可选 `qrAuthUrl` 参数（不传则页面不渲染扫码块，桌面零影响）。
+- 测试：`wxWebAuthUrl` 断言 scope=snsapi_base、新增 `wxQrLoginUrl` 形状测试、formPage 断言
+  `#wx-qr-url` 与 10005 文案；`mobile-login`+`wx-share` 共 52 例全过。
+
 ## 0.7.8 — 2026-11-25
 
 - **手机微信登录改用「网页授权」，一台手机直接确认（不再扫二维码）**：旧版手机端授权链接用的是
