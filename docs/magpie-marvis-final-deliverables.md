@@ -66,7 +66,7 @@ export MARVIS_WS_MODE=remote
 
 ## 五、已生成文件
 
-- [诊断脚本 magpie-marvis-diag.sh](magpie-marvis-diag.sh)：Termux 只读诊断，检查环境变量、gateway.json、10123/8088 监听、/v1/models、抓包建议与结构化结论。
+- [诊断脚本 magpie-marvis-diag.sh](magpie-marvis-diag.sh)：Termux 只读诊断，检查环境变量、gateway.json、10123/8088 监听、/v1/models、抓包建议与结构化结论；`--fix` 会写 gateway.json 并在 8088 未监听时自动找 `run.sh` 拉起网关（`--no-start` 只写配置）。
 - [优化方案 magpie-marvis-503-optimization-plan.md](magpie-marvis-503-optimization-plan.md)：含完整源码证据、截图回复评价、配置/诊断/代码三层方案。
 - [代码补丁设计 magpie-marvis-code-patch-design.md](magpie-marvis-code-patch-design.md)：按复核证据修正，区分真正优先的 localgateway 诊断补丁与 AG-UI WS 参考补丁。
 

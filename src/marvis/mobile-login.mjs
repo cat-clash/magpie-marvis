@@ -253,6 +253,12 @@ function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
   // QQ：mqqapi:// 唤起 App；微信：weixin:// 唤起微信本体，授权链接靠「复制 + 微信内打开」
   const primaryHref = isWx ? wxAppLaunchUrl() : qqAppLaunchUrl(authUrl)
   const primaryText = isWx ? `唤起微信 App 授权（${name}）` : `唤起手机 QQ 登录（${name}）`
+  // 微信的主按钮只唤起微信本体（weixin:// 不带 URL），所以点它时顺手把授权链接复制好，
+  // 用户在微信里直接粘贴；点完还得回来手动复制的流程太容易半途而废。
+  const primaryAttrs = isWx ? ` onclick="return copyAndGo()"` : ""
+  const primaryNote = isWx
+    ? `<p class="muted">点下面的按钮：唤起微信 + 同时把授权链接复制到剪贴板（到微信里直接粘贴）。</p>`
+    : ""
   const fallback = isWx
     ? `<p class="muted">${esc(WECHAT_OPEN_HINT)}</p>
        <p class="muted">复制授权链接（唤起微信后，粘贴到微信「文件传输助手」点开）：</p>
@@ -270,6 +276,16 @@ function copyWxUrl(){
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(el.value).then(()=>{flashCopy()},()=>fallbackCopy(el));
   }else{fallbackCopy(el)}
+}
+// 点「唤起微信」时顺手复制：一次点击完成「跳微信 + 链接进剪贴板」，
+// 否则用户到微信里还得回来复制一次，中间一换 App 就容易忘记步骤。
+function copyAndGo(){
+  const el=document.getElementById('wx-auth-url');
+  if(!el) return true;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(el.value).then(()=>{flashCopy()},()=>fallbackCopy(el));
+  }else{fallbackCopy(el)}
+  return true;
 }
 function fallbackCopy(el){
   el.focus();el.select();el.setSelectionRange(0,el.value.length);
@@ -293,7 +309,8 @@ function flashCopy(){
     `<h1>${esc(name)}登录</h1>
 ${err}
 <p class="lead">${step1}</p>
-<a class="primary" href="${esc(primaryHref)}">${esc(primaryText)}</a>
+<a class="primary" href="${esc(primaryHref)}"${primaryAttrs}>${esc(primaryText)}</a>
+${primaryNote}
 ${fallback}
 
 <hr>

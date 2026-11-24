@@ -1,6 +1,6 @@
 {
   "package": "magpie-marvis-final",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "name": "腾讯 Marvis Final TENCENT",
   "providers": [
     "marvis"

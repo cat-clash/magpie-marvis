@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.4）
+# 腾讯 Marvis · magpie 供应商插件（0.7.5）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.4）
+## 传输通道（0.7.5）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -34,6 +34,16 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 主动续期：token 剩余时效不足 `MARVIS_REFRESH_LEAD_MS`（默认 30 天，clamp 微信 TTL 1/3）时提前续期，
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
+
+## 0.7.4 / 0.7.5 新增（手机上最常用的三条）
+
+- **账号随便取消登录 / 移除**（0.7.4）：`node scripts/cli.mjs accounts list|logout|remove`，
+  不再受「第一个账号删不掉」限制；`list --verbose` 看 `expires`/`guid`/字段全集，`--json` 给脚本接管（0.7.5）。
+- **503 一键自愈**（0.7.5）：`sh ~/.magpie-marvis-native/magpie-marvis-diag.sh --fix`
+  会写好 `gateway.json`，8088 没监听时自动找到 `run.sh` 执行 `sh run.sh start`，并轮询 `/v1/models` 到就绪；
+  只想写配置就加 `--no-start`。
+- **微信登录不必扫码**（0.7.4）：主按钮 `weixin://` 唤起微信，同时把授权链接复制到剪贴板（0.7.5），
+  粘到微信「文件传输助手」点开即可弹「确认授权」。
 
 ## 手机怎么用（Termux / PRoot / magpie 安卓壳）
 

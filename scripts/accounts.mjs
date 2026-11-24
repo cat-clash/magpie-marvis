@@ -85,6 +85,17 @@ function entries(json) {
   return out
 }
 
+/** expires 毫秒时间戳 → ISO 字符串；0/负数/非数字（= 到期未知）返回空串 */
+function isoOrEmpty(expires) {
+  const n = Number(expires ?? 0)
+  if (!Number.isFinite(n) || n <= 0) return ""
+  try {
+    return new Date(n).toISOString()
+  } catch {
+    return ""
+  }
+}
+
 /**
  * 选择器匹配：整键 > uid 精确 > accountId 精确 > 卡片名包含 > 键后缀包含。
  * 命中 0 条 / 多条由调用方决定退出码（1 / 2）。
@@ -152,7 +163,8 @@ function usage() {
       "  --config <目录>   magpie 配置目录（默认 $MAGPIE_CONFIG 或 ~/.config/magpie）",
       "  --dry-run         只打印 before/after，不写盘",
       "  --yes             非交互环境跳过确认（推荐脚本里带上）",
-      "  --json            list 输出 JSON",
+      "  --json            list/logout/remove 都输出 JSON（stdout 只有一份结果，便于脚本接管）",
+      "  --verbose         list 额外显示 expires / 剩余毫秒 / guid / 字段全集",
       "",
       "退出码：0 成功 · 1 环境/目标错误 · 2 选择器歧义（打印了候选，请用更精确的选择器）",
       "注意：执行前先**完全退出 magpie**，执行后**重启 magpie** 才会看到效果（壳有内存态）。",
@@ -219,6 +231,12 @@ function finishNote(action, wrote) {
   )
 }
 
+/** --json 模式：stdout 只留一份机器可读结果，人读信息一律不混进来 */
+function emitJson(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n")
+  return 0
+}
+
 function cmdList(args) {
   const dir = configDir(args.config)
   const { file, json } = readAuthFile(dir)
@@ -233,9 +251,13 @@ function cmdList(args) {
         list.map((e) => ({
           key: e.key,
           accountId: e.acct.accountId ?? "",
+          nickname: e.acct.metadata?.nickname ?? "",
           uid: e.acct.uid ?? "",
           loginType: loginTypeLabel(e.acct),
           state: stateLabel(e.acct),
+          expires: Number(e.acct.expires ?? 0),
+          expiresAt: isoOrEmpty(e.acct.expires),
+          msLeft: msUntilExpiry(e.acct),
           openid: e.acct.metadata?.openid ?? "",
           guid: e.acct.metadata?.guid ?? "",
           revokedAt: e.acct.metadata?.revokedAt ?? 0,
@@ -258,8 +280,22 @@ function cmdList(args) {
       `  ${i + 1}. ${name}\n` +
         `     key=${e.key}  uid=${e.acct.uid ?? "-"}  类型=${loginTypeLabel(e.acct)}  状态=${stateLabel(e.acct)}\n`,
     )
+    if (args.verbose) {
+      const left = msUntilExpiry(e.acct)
+      const fields = Object.keys(e.acct).sort().join(",")
+      process.stdout.write(
+        `     expires=${isoOrEmpty(e.acct.expires) || "-"}` +
+          `  ${left === null ? "剩余=未知" : `剩余ms=${left}`}\n` +
+          `     openid=${e.acct.metadata?.openid ?? "-"}  guid=${e.acct.metadata?.guid ?? "-"}\n` +
+          `     revokedAt=${e.acct.metadata?.revokedAt ?? 0}  metadata键=${Object.keys(e.acct.metadata ?? {}).sort().join(",") || "-"}\n` +
+          `     字段=${fields || "-"}\n`,
+      )
+    }
   }
-  process.stdout.write("\n选择器可用：整条 key / uid / 卡片名（含片段即可匹配）\n")
+  process.stdout.write(
+    "\n选择器可用：整条 key / uid / 卡片名（含片段即可匹配）" +
+      (args.verbose ? "\n" : "（加 --verbose 看 expires / guid / 字段全集）\n"),
+  )
   return 0
 }
 
@@ -295,14 +331,36 @@ function cmdLogout(args, selector) {
     }
     return { key: e.key, before, after, already }
   })
-  for (const p of plan) printDiff(p.key, p.before, p.already ? p.before : p.after)
+  if (!args.json) for (const p of plan) printDiff(p.key, p.before, p.already ? p.before : p.after)
   const pending = plan.filter((p) => !p.already)
+  const alreadyKeys = plan.filter((p) => p.already).map((p) => p.key)
   if (pending.length === 0) {
+    if (args.json)
+      return emitJson({
+        action: "logout",
+        file,
+        dryRun: !!args["dry-run"],
+        count: 0,
+        keys: [],
+        already: alreadyKeys,
+        backup: null,
+        note: "所有目标账号已是取消登录状态，未做任何修改",
+      })
     process.stdout.write(`（${plan.length} 个账号都已是取消登录状态，未做任何修改）\n`)
     return 0
   }
   confirm("logout", args)
   if (args["dry-run"]) {
+    if (args.json)
+      return emitJson({
+        action: "logout",
+        file,
+        dryRun: true,
+        count: pending.length,
+        keys: pending.map((p) => p.key),
+        already: alreadyKeys,
+        backup: null,
+      })
     finishNote(`取消 ${pending.length} 个账号登录`, false)
     return 0
   }
@@ -310,6 +368,16 @@ function cmdLogout(args, selector) {
   for (const p of pending) nextJson[p.key] = p.after
   recheckUnchanged(file, json, new Set(pending.map((p) => p.key)))
   const backup = atomicWrite(file, nextJson)
+  if (args.json)
+    return emitJson({
+      action: "logout",
+      file,
+      dryRun: false,
+      count: pending.length,
+      keys: pending.map((p) => p.key),
+      already: alreadyKeys,
+      backup,
+    })
   process.stdout.write(`备份：${backup}\n`)
   finishNote(`取消 ${pending.length} 个账号登录`, true)
   return 0
@@ -331,9 +399,11 @@ function cmdRemove(args, selector) {
   if (all || matched.length > 1) return ambiguous(matched, selector || "--all")
 
   const e = matched[0]
-  printDiff(e.key, e.acct, undefined)
+  if (!args.json) printDiff(e.key, e.acct, undefined)
   confirm("remove", args)
   if (args["dry-run"]) {
+    if (args.json)
+      return emitJson({ action: "remove", file, dryRun: true, key: e.key, accountId: e.acct.accountId ?? "", backup: null })
     process.stdout.write("提示：插件没有上游登出接口，移除=本地清凭据；远端会话由 token 自然过期兜底。\n")
     finishNote("移除该账号", false)
     return 0
@@ -342,6 +412,8 @@ function cmdRemove(args, selector) {
   delete nextJson[e.key]
   recheckUnchanged(file, json, new Set([e.key]))
   const backup = atomicWrite(file, nextJson)
+  if (args.json)
+    return emitJson({ action: "remove", file, dryRun: false, key: e.key, accountId: e.acct.accountId ?? "", backup })
   process.stdout.write(`备份：${backup}\n`)
   process.stdout.write("提示：路由组/用量统计里若还引用该账号，重启 magpie 后由壳自行清理（插件不碰壳的其他状态）。\n")
   finishNote("移除该账号", true)

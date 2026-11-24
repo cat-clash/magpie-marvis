@@ -515,6 +515,8 @@ test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", a
     // 粘贴框
     assert.match(html, /<textarea/, "页面必须有粘贴框")
     assert.match(html, /name="callback"/)
+    // QQ 的 mqqapi:// 自带 URL，不需要「先复制再粘贴」，别把微信那套脚本塞进 QQ 页
+    assert.doesNotMatch(html, /copyAndGo/, "QQ 页不该出现微信的复制跳转脚本")
   } finally {
     s.close()
   }
@@ -546,6 +548,9 @@ test("本地登录页：微信页给「唤起微信 + 复制授权链接」，�
     assert.doesNotMatch(html, /识别图中二维码/, "微信页不再教长按识别二维码")
     assert.match(html, /点下面的按钮唤起微信/, "第 1 步文案必须与按钮真实行为一致（只唤起，不完成授权）")
     assert.doesNotMatch(html, /点下面的按钮完成微信授权/, "点一下不会完成授权，别写这种误导句")
+    assert.match(html, /onclick="return copyAndGo\(\)"/, "主按钮要点一次就同时复制链接，别让用户来回切 App")
+    assert.match(html, /function copyAndGo\(/, "copyAndGo 脚本本体必须在页面里")
+    assert.match(html, /同时把授权链接复制到剪贴板/, "要把「顺手复制」这件事写在按钮旁边")
     assert.match(html, /<textarea/, "同样要有粘贴框")
   } finally {
     s.close()

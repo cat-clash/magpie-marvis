@@ -1,14 +1,27 @@
 #!/bin/sh
 # magpie-marvis 端口与 503 诊断脚本（Termux / POSIX sh）
-# 用法：sh magpie-marvis-diag.sh [--fix]
-# 只读诊断默认；--fix 会在确认使用 8088 HTTP 网关时补写 gateway.json 与稳定目录脚本。
-# 不依赖 jq。
+# 用法：sh magpie-marvis-diag.sh [--fix] [--no-start]
+# 只读诊断默认；--fix 会写 gateway.json，并在 8088 未监听时尝试 `sh run.sh start` 拉起网关。
+# --no-start 配合 --fix：只写配置不启动。不依赖 jq。
 
 set -u
 
 GW_JSON="$HOME/.magpie-marvis-native/gateway.json"
 FIX=0
-[ "${1:-}" = "--fix" ] && FIX=1
+START=1
+for _arg in "$@"; do
+  case "$_arg" in
+    --fix) FIX=1 ;;
+    --no-start) START=0 ;;
+    --start) START=1 ;;
+    -h|--help)
+      printf '%s\n' '用法：sh magpie-marvis-diag.sh [--fix] [--no-start]'
+      printf '%s\n' '  默认只读诊断；--fix 写 gateway.json 并在需要时尝试启动 8088 网关。'
+      printf '%s\n' '  --no-start  配合 --fix：只写配置，不去启动网关。'
+      exit 0
+      ;;
+  esac
+done
 
 section() {
   printf '\n============================================================\n'
@@ -212,6 +225,52 @@ if [ "$FIX" -eq 1 ]; then
 EOF
   printf 'WROTE  : %s\n' "$GW_JSON"
   printf 'URL    : %s\n' "$URL"
-  printf '%s\n' '下一步：若 8088 未监听，先在网关目录执行 sh run.sh start；再执行 magpie provider test。'
+
+  # 配置写好了，但 8088 没进程在听的话插件照样 503 —— 顺手把网关卡起来。
+  GW_DIR=''
+  for _d in "${MARVIS_PROXY_DIR:-}" "$HOME/Marvis-proxy-public" "$HOME/marvis-proxy-public" \
+            "$HOME/Marvis-proxy" "$HOME/.magpie-marvis/gateway"; do
+    [ -n "$_d" ] || continue
+    if [ -f "$_d/run.sh" ]; then GW_DIR="$_d"; break; fi
+  done
+
+  FIX_RUNNING=0
+  if have curl && [ "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "$URL/models" 2>/dev/null || echo 000)" = "200" ]; then
+    FIX_RUNNING=1
+  fi
+
+  START_LOG="$HOME/.magpie-marvis-native/gateway-start.log"
+  if [ "$FIX_RUNNING" -eq 1 ]; then
+    printf 'GATEWAY: 已在监听（%s）\n' "$URL"
+  elif [ "$START" -eq 0 ]; then
+    printf 'GATEWAY: 未监听，按 --no-start 跳过启动。请手动执行：sh run.sh start\n'
+  elif [ -z "$GW_DIR" ]; then
+    printf 'GATEWAY: 未监听，且没找到 run.sh（找过 MARVIS_PROXY_DIR / ~/Marvis-proxy-public 等）。\n'
+    printf '         先把网关目录放好，或用 MARVIS_PROXY_DIR=/path/to/gateway 再跑一次。\n'
+  else
+    printf 'GATEWAY: 未监听，尝试启动：cd %s && sh run.sh start\n' "$GW_DIR"
+    ( cd "$GW_DIR" && sh run.sh start ) >>"$START_LOG" 2>&1
+    printf 'GATEWAY: 启动命令已执行（日志 %s）\n' "$START_LOG"
+    _i=0
+    while [ "$_i" -lt 12 ]; do
+      sleep 1
+      _i=$((_i + 1))
+      if have curl && [ "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "$URL/models" 2>/dev/null || echo 000)" = "200" ]; then
+        FIX_RUNNING=1
+        printf 'GATEWAY: %s 秒后 /v1/models 返回 200\n' "$_i"
+        break
+      fi
+      printf '  等待网关就绪… %s/12\n' "$_i"
+    done
+    if [ "$FIX_RUNNING" -ne 1 ]; then
+      printf 'GATEWAY: 12 秒内没就绪。看日志：tail -n 40 %s\n' "$START_LOG"
+    fi
+  fi
+
+  printf '\nFIX_RESULT:\n'
+  printf '  gateway_json : %s\n' "$GW_JSON"
+  printf '  url          : %s\n' "$URL"
+  printf '  listening    : %s\n' "$FIX_RUNNING"
+  printf '  next         : magpie 里点「测试模型」；仍 503 就再跑一次本脚本看 models_http_code\n'
 fi
 exit 0

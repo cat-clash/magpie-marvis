@@ -266,3 +266,82 @@ test("--all：logout 支持批量，remove 明确拒绝", () => {
   assert.match(bad.out, /不支持 --all/)
   assert.ok("marvis#111" in bad.json)
 })
+
+/** 只要 stdout：--json 模式下 JSON.parse 不能被 stderr 或人读输出污染 */
+function runOut(dir, args) {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args, "--config", dir], { encoding: "utf8" })
+  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" }
+}
+
+test("list --verbose：显示 expires ISO / guid / 字段全集，且不再提示加 --verbose", () => {
+  const dir = fixtureTracked(TWO_ACCOUNTS)
+  const r = runOut(dir, ["list", "--verbose"])
+  assert.equal(r.code, 0, r.stderr)
+  assert.match(r.stdout, /expires=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "expires 要给人能读的时间")
+  assert.match(r.stdout, /guid=aaaaaaaa/)
+  assert.match(r.stdout, /字段=access,accountId,expires,metadata,refresh,uid/)
+  assert.doesNotMatch(r.stdout, /加 --verbose 看/)
+
+  const plain = runOut(dir, ["list"])
+  assert.match(plain.stdout, /加 --verbose 看/, "默认视图要指出还有更详细视图")
+})
+
+test("list --json：补上 expiresAt / msLeft / nickname", () => {
+  const dir = fixtureTracked(TWO_ACCOUNTS)
+  const r = runOut(dir, ["list", "--json"])
+  assert.equal(r.code, 0, r.stderr)
+  const arr = JSON.parse(r.stdout)
+  assert.match(arr[0].expiresAt, /^\d{4}-\d{2}-\d{2}T/)
+  assert.equal(typeof arr[0].msLeft, "number")
+  assert.equal(arr[0].nickname, "阿伟")
+})
+
+test("logout --json --dry-run：stdout 是纯 JSON，dryRun=true 且不写盘", () => {
+  const dir = fixtureTracked(TWO_ACCOUNTS)
+  const r = runOut(dir, ["logout", "marvis#111", "--dry-run", "--json"])
+  assert.equal(r.code, 0, r.stderr)
+  const o = JSON.parse(r.stdout)
+  assert.equal(o.action, "logout")
+  assert.equal(o.dryRun, true)
+  assert.deepEqual(o.keys, ["marvis#111"])
+  assert.equal(o.backup, null)
+  assert.equal(readJson(dir)["marvis#111"].access, "ACC-A")
+})
+
+test("logout --json：返回备份路径与已取消的键", () => {
+  const dir = fixtureTracked(TWO_ACCOUNTS)
+  const r = runOut(dir, ["logout", "marvis#111", "--yes", "--json"])
+  assert.equal(r.code, 0, r.stderr)
+  const o = JSON.parse(r.stdout)
+  assert.equal(o.action, "logout")
+  assert.equal(o.dryRun, false)
+  assert.deepEqual(o.keys, ["marvis#111"])
+  assert.match(o.backup, /\.bak-\d+$/)
+  assert.equal(readJson(dir)["marvis#111"].access, "")
+  assert.equal(readJson(dir)["marvis#222"].access, "ACC-B", "其他账号不许被动")
+})
+
+test("logout --json：已取消过的账号 count=0、不产生新备份（幂等）", () => {
+  const dir = fixtureTracked(TWO_ACCOUNTS)
+  runOut(dir, ["logout", "marvis#111", "--yes", "--json"])
+  const before = readdirSync(dir).filter((f) => f.includes(".bak-")).length
+  const r = runOut(dir, ["logout", "marvis#111", "--yes", "--json"])
+  assert.equal(r.code, 0, r.stderr)
+  const o = JSON.parse(r.stdout)
+  assert.equal(o.count, 0)
+  assert.deepEqual(o.already, ["marvis#111"])
+  assert.equal(o.backup, null)
+  assert.equal(readdirSync(dir).filter((f) => f.includes(".bak-")).length, before, "幂等再来一次不该再写备份")
+})
+
+test("remove --json：返回 key 与备份，条目已删", () => {
+  const dir = fixtureTracked(TWO_ACCOUNTS)
+  const r = runOut(dir, ["remove", "marvis#222", "--yes", "--json"])
+  assert.equal(r.code, 0, r.stderr)
+  const o = JSON.parse(r.stdout)
+  assert.equal(o.action, "remove")
+  assert.equal(o.key, "marvis#222")
+  assert.equal(o.accountId, "微信·同号")
+  assert.match(o.backup, /\.bak-\d+$/)
+  assert.ok(!("marvis#222" in readJson(dir)))
+})

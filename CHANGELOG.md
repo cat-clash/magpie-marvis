@@ -1,5 +1,22 @@
 # 更新记录
 
+## 0.7.5 — 2026-11-25
+
+- **诊断脚本 `--fix` 变成真自愈**：写完 `gateway.json` 后，如果 8088 上没人监听，脚本会按
+  `MARVIS_PROXY_DIR` → `~/Marvis-proxy-public` → `~/marvis-proxy-public` → `~/Marvis-proxy`
+  的顺序找 `run.sh`，执行 `sh run.sh start` 并轮询 `GET /v1/models`（最多 12 秒），最后打印
+  `FIX_RESULT`（gateway_json / url / listening / next）。新增 `--no-start`（只写配置不起进程）与
+  `--help`；启动日志落在 `~/.magpie-marvis-native/gateway-start.log`。
+- **accounts CLI 可脚本化**：`list --verbose` 额外显示 `expires` 的 ISO 时间、剩余毫秒、`guid`、
+  字段全集；`--json` 现在覆盖 `logout` / `remove`（stdout 只有一份结果：`action`/`dryRun`/`count`/
+  `keys`/`already`/`backup`），`list --json` 补 `expiresAt`/`msLeft`/`nickname`。
+  幂等的「已取消」场景返回 `count: 0` 且不产生新备份。
+- **微信登录页少一步**：点主按钮唤起微信的同时把授权链接复制到剪贴板（`copyAndGo()`），
+  按钮旁写明「顺手复制」，不用再切回浏览器手动复制一次。QQ 页保持原样（`mqqapi://` 自带 URL）。
+- 新增 `tests/diag-script.test.mjs`：`sh -n` 语法、`--help`、只读模式不落盘、`--fix --no-start`
+  的 `gateway.json` 形状、找不到 `run.sh` 时的下一步提示。`tests/accounts-cli.test.mjs` 增至 22 例，
+  `tests/mobile-login.test.mjs` 补 `copyAndGo` 与「QQ 页不得出现 `copyAndGo`」断言。
+
 ## 0.7.4 — 2026-11-25
 
 - 手机微信登录改为直接唤起微信 App：登录页主按钮用 `weixin://` 唤起微信，新增「复制授权链接」按钮，把授权链接粘贴到微信「文件传输助手」打开即可弹出「确认授权」页，一台手机即可完成。

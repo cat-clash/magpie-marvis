@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.7.4 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.7.5 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -132,11 +132,15 @@ gateway 通道仍然推荐（账号池在网关侧维护），但**不再是手�
 
 ```sh
 node scripts/cli.mjs accounts list                 # 看 key / 卡片名 / QQ·微信 / 状态
+node scripts/cli.mjs accounts list --verbose       # 再加 expires(ISO) / 剩余毫秒 / guid / 字段全集
 node scripts/cli.mjs accounts logout  <key|uid|卡片名>   # 取消登录状态（保留卡片，重新登录可复用）
 node scripts/cli.mjs accounts remove  <key|uid|卡片名>   # 直接移除这条账号
+node scripts/cli.mjs accounts list --json --config ~/.config/magpie   # 脚本接管（见下）
 ```
 
 - 追加 `--dry-run` 只看改动、`--yes` 免确认（非交互环境必须带）、`--all` 批量取消登录（`remove` 不支持 `--all`）。
+- `--json` 对 `list`/`logout`/`remove` 都生效，stdout 只留一份机器可读结果
+  （`action`/`dryRun`/`count`/`keys`/`already`/`backup`），人读信息不混进来；幂等的「已取消」返回 `count: 0`。
 - 取消登录 = 清空 `access`/`refresh` + `expires` 拨到过去 + 打 `metadata.revokedAt`：
   插件随即回 `401 + X-Magpie-Sign-In: expired`，magpie 上显示「需要重新登录」，不会再拿着空 token 出网。
 - 写盘前自动留 `plugin-auth.json.bak-<时间戳>`，并做并发校验：检测到 magpie 正在写回该文件就放弃本次操作。
