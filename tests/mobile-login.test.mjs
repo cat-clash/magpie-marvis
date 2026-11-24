@@ -3,6 +3,8 @@
 // 覆盖「手机点 QQ / 微信登录唤不起」的三个根因对应的修复：
 //   ① QQ 授权页在手机上必须是 display=mobile（否则渲染 PC 表单，不唤起 App）
 //   ② 微信是 PC 扫码页，instructions 与登录页必须教「唤起微信 App + 复制授权链接到微信里打开」
+//      0.7.8 起手机端微信授权链接改用「网页授权」(oauth2/authorize + snsapi_userinfo)：
+//      在微信内打开直接弹确认页，一台手机完成；qrconnect 只作桌面备用。
 //   ③ 壳的粘贴补丁按包名打，本插件包名不匹配 → 自带 127.0.0.1 表单页，不依赖壳
 //
 // 跑法：node --test tests/mobile-login.test.mjs
@@ -11,7 +13,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 
 import { isMobile, mobileInstructions, startPasteServer, mobileOauthLogin } from "../src/marvis/mobile-login.mjs"
-import { authorizeUrl, extractCode, stateOf } from "../src/marvis/login.mjs"
+import { authorizeUrl, wxWebAuthUrl, extractCode, stateOf } from "../src/marvis/login.mjs"
 
 /** 与真实换取同形的回调地址（不联网：只测到 code/state 解析与表单流程） */
 function fakeCallback(code = "ABCDEF1234567890abcdef", state = "31.1177412") {
@@ -84,6 +86,38 @@ test("authorizeUrl：微信两条路都不加 display（qrconnect 没有这个�
     assert.equal(u.searchParams.has("display"), false)
     assert.equal(u.searchParams.get("state"), "d".repeat(32), "微信 state 就是 guid")
   }
+})
+
+test("wxWebAuthUrl：微信网页授权走 oauth2/authorize + snsapi_userinfo + #wechat_redirect（手机一台完成，不扫码）", () => {
+  const u = new URL(wxWebAuthUrl("e".repeat(32)))
+  assert.equal(u.host, "open.weixin.qq.com")
+  assert.equal(u.pathname, "/connect/oauth2/authorize", "必须是网页授权，不是 qrconnect")
+  assert.equal(u.searchParams.get("scope"), "snsapi_userinfo", "弹确认授权页的 scope")
+  assert.equal(u.searchParams.get("response_type"), "code")
+  assert.equal(u.searchParams.get("state"), "e".repeat(32), "state 原样回传 guid")
+  assert.match(u.searchParams.get("redirect_uri"), /marvis_oauth\?login_type=WX$/, "回调仍带 login_type=WX")
+  assert.ok(u.hash.endsWith("#wechat_redirect"), "必须有 #wechat_redirect（微信内跳转标记）")
+})
+
+test("mobileOauthLogin：微信 authorize 走网页授权链接（不是 qrconnect），放进本地页的授权框", async () => {
+  let passedAuthUrl = ""
+  const server = async ({ authorizeUrl: authUrl }) => {
+    passedAuthUrl = authUrl
+    return {
+      url: "http://127.0.0.1:4618/",
+      wait: Promise.resolve({ openid: "X", accessToken: "T", loginType: "1" }),
+      close() {},
+    }
+  }
+  const m = mobileOauthLogin({ loginType: "WX", toAuth: (a) => a, startServer: server })
+  const r = await m.authorize()
+  // 0.7.8：本地页里回显的授权链接必须是网页授权，微信内打开直接弹确认页
+  assert.match(passedAuthUrl, /open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "授权链接必须是网页授权")
+  assert.match(passedAuthUrl, /scope=snsapi_userinfo/)
+  assert.doesNotMatch(passedAuthUrl, /qrconnect/, "不许再用扫码页")
+  assert.match(passedAuthUrl, /#wechat_redirect$/, "必须带微信内跳转标记")
+  // 壳打开的仍是本机引导页（拿按钮 + 粘贴框）
+  assert.match(r.url, /^http:\/\/127\.0\.0\.1:\d+\//)
 })
 
 // ── instructions ───────────────────────────────────────────────────────
@@ -527,7 +561,7 @@ test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", a
 
 test("本地登录页：微信页给「唤起微信 + 复制授权链接」，不用假的 scheme", async () => {
   const { startPasteServer } = await import("../src/marvis/mobile-login.mjs")
-  const authUrl = "https://open.weixin.qq.com/connect/qrconnect?appid=x"
+  const authUrl = wxWebAuthUrl("8".repeat(32))
   const s = await startPasteServer({
     loginType: "WX",
     guid: "8".repeat(32),
@@ -544,9 +578,10 @@ test("本地登录页：微信页给「唤起微信 + 复制授权链接」，�
     assert.match(html, /<input[^>]*id="wx-auth-url"/, "必须有可复制的授权链接输入框本体")
     assert.match(html, /id="wx-copy-btn"/, "复制按钮要有稳定 id，别靠 DOM 位置猜")
     assert.match(html, /getElementById\('wx-copy-btn'\)/, "「已复制 ✓」的回写必须按 id 定位按钮")
-    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect/, "输入框必须回显本次授权页地址")
+    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "输入框必须回显本次网页授权地址")
     assert.match(html, /一台手机扫不了自己的码/, "必须明说不要走保存图片扫码那条链路")
-    assert.match(html, /备用：用系统浏览器打开授权页/, "必须保留系统浏览器兜底链接")
+    assert.match(html, /必须在微信里打开/, "网页授权链接必须强调在微信内打开，系统浏览器只会看到提示页")
+    assert.doesNotMatch(html, /备用：用系统浏览器打开授权页/, "网页授权在系统浏览器打不开，不能再给这个兜底链接")
     assert.doesNotMatch(html, /mqqapi:\/\//, "微信页不该用 QQ 的 scheme")
     assert.doesNotMatch(html, /识别图中二维码/, "微信页不再教长按识别二维码")
     assert.match(html, /点下面的按钮唤起微信/, "第 1 步文案必须与按钮真实行为一致（只唤起，不完成授权）")

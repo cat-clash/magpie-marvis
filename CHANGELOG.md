@@ -1,5 +1,21 @@
 # 更新记录
 
+## 0.7.8 — 2026-11-25
+
+- **手机微信登录改用「网页授权」，一台手机直接确认（不再扫二维码）**：旧版手机端授权链接用的是
+  `connect/qrconnect?scope=snsapi_login`（网站应用扫码登录），在微信里打开仍是一张二维码 ——
+  用户截图实测卡死在微信的「该二维码仅支持摄像头识别，不支持相册读取」提示，一台手机扫不了自己屏幕的码。
+  现在 `authorizeUrl("WX")` 之外新增 `wxWebAuthUrl(guid)`，生成
+  `connect/oauth2/authorize?scope=snsapi_userinfo#wechat_redirect`（公众号网页授权），**在微信内置浏览器里
+  打开直接弹「确认授权」页**，点「允许」后跳回 `yybadaccess…?code=…`，复制粘贴回 magpie 即可，全程不用扫码。
+  QR 链接保留作桌面备用，QQ 逻辑不变；换取端 `parseCallback → exchangeCode` 只用 code + guid，不挑 scope，直接复用。
+  - 实测依据（MicroMessenger UA + 本 appid）：`oauth2/authorize` → 301 → 标准网页授权入口（参数被接受）；
+    `qrconnect` → 200 → 二维码页。
+  - 页面文案同步：强调这条链接**必须在微信里打开**（系统浏览器打开只会显示「请在微信客户端打开链接」），
+    移除已失效的「用系统浏览器打开」备用按钮；分享/复制/唤起按钮全保留。
+  - 新增测试：`wxWebAuthUrl` 形状、微信 authorize 传网页授权链接给本地页、页面回显 oauth2/authorize，
+    `mobile-login`+`wx-share` 共 51 例。版本全线 bump 0.7.8。
+
 ## 0.7.7 — 2026-11-25
 
 - **撤掉登录菜单里的「账号管理」入口**：0.7.6 加的入口位置不对 —— 没登录时没账号可管，已登录的账号又不会去登录菜单里找「移除」。删掉 `src/marvis/account-manager.mjs` 与 `methods()` 手机分支的 `accountManagerMethod()`；账号管理仍走 Termux CLI：`node scripts/cli.mjs accounts list/logout/remove`（`--json`/`--verbose`、备份、幂等、歧义保护全保留），共享语义层 `src/marvis/accounts-store.mjs` 保留。

@@ -63,7 +63,7 @@
 import { createServer } from "node:http"
 import { randomBytes } from "node:crypto"
 
-import { authorizeUrl, extractCode, stateOf, parseCallback, pastedInputOf } from "./login.mjs"
+import { authorizeUrl, wxWebAuthUrl, extractCode, stateOf, parseCallback, pastedInputOf } from "./login.mjs"
 
 /** 本地表单页默认端口；被占用时自动退到随机端口 */
 export const DEFAULT_PASTE_PORT = 4618
@@ -162,7 +162,7 @@ export function wxAppLaunchUrl() {
  */
 export const WECHAT_OPEN_HINT =
   "微信授权首选「分享到微信（推荐）」：点它后在系统分享面板选「微信」→「文件传输助手」→ 发送，" +
-  "在微信里点开链接就会弹出「确认授权」页，点「允许」即可。不要再保存二维码图片扫码（一台手机扫不了自己的码）。" +
+  "在微信里点开链接就会弹出「确认授权」页，点「允许」即可。这是微信「网页授权」，必须在微信里打开（不要用系统浏览器直接开这个链接）；一台手机全程完成，不用扫码，也不要保存二维码图片（一台手机扫不了自己的码）。" +
   "备用：点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，" +
   "在微信里点开它同样弹出「确认授权」页，点「允许」。若按钮没反应，长按复制下面链接手动粘贴到微信里打开。"
 
@@ -292,8 +292,7 @@ export function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
        <p class="muted">复制授权链接（唤起微信后，粘贴到微信「文件传输助手」点开）：</p>
        <input type="text" id="wx-auth-url" readonly value="${esc(authUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#fff;color:inherit;font:13px/1.4 ui-monospace,monospace">
        <button type="button" id="wx-copy-btn" onclick="copyWxUrl()">复制授权链接</button>
-        <p class="muted">如果唤起没反应，用系统浏览器打开授权页（扫码兜底，需要另一台设备）：</p>
-       <a class="secondary" href="${esc(authUrl)}" target="_blank" rel="noreferrer">备用：用系统浏览器打开授权页</a>`
+        <p class="muted">这条是微信「网页授权」链接，必须在微信里打开才会弹确认授权页；系统浏览器直接打开只会看到「请在微信客户端打开链接」。请用上面的「分享到微信」，或复制后粘贴到微信「文件传输助手」打开。</p>`
     : `<p class="muted">没装手机 QQ 时，用下面的按钮在浏览器里完成网页版登录：<br>
        <a class="alt" href="${esc(authUrl)}" target="_blank" rel="noreferrer">用浏览器打开 QQ 授权页</a></p>`
 
@@ -624,7 +623,13 @@ export function mobileOauthLogin({
       // 每个账号一个独立 guid —— 与桌面路径同一套虚拟设备机制，避免新号顶掉旧号
       const { newDeviceGuid } = await import("./device.mjs")
       const guid = newDeviceGuid()
-      const authUrl = authorizeUrl(loginType, guid, { mobile: true })
+      // ⚠ 微信手机端必须用「网页授权」（oauth2/authorize + snsapi_userinfo + #wechat_redirect）：
+      //   在微信内置浏览器打开会直接弹「确认授权」页，一台手机全程完成。
+      //   旧的 qrconnect 是扫码页，手机上看到一张自己扫不了的二维码（用户实测卡死）。
+      //   QQ 仍用 graph.qq.com display=mobile（系统浏览器触发 mqqapi 唤起）。
+      //   state=guid 两条路都一样，回调 parseCallback 靠它认回设备，换取端不挑 scope。
+      const authUrl =
+        loginType === "WX" ? wxWebAuthUrl(guid) : authorizeUrl(loginType, guid, { mobile: true })
 
       // 本地登录页作为兜底（壳没给输入框时用户仍能走通）：必须在 authorize() 里就起来
       const paste = await startServer({ loginType, guid, authorizeUrl: authUrl, timeoutMs })

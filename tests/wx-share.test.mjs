@@ -15,8 +15,9 @@ import { formPage, WECHAT_OPEN_HINT, mobileInstructions } from "../src/marvis/mo
 
 const TOKEN = "0".repeat(32)
 const WX_AUTH_URL =
-  "https://open.weixin.qq.com/connect/qrconnect?appid=wxTESTAPPID&redirect_uri=https%3A%2F%2Fyybadaccess.3g.qq.com%2Fmarvis_client_login%2Fmarvis_oauth&response_type=code&scope=snsapi_login&state=" +
-  "8".repeat(32)
+  "https://open.weixin.qq.com/connect/oauth2/authorize?appid=wxTESTAPPID&redirect_uri=https%3A%2F%2Fyybadaccess.3g.qq.com%2Fmarvis_client_login%2Fmarvis_oauth%3Flogin_type%3DWX&response_type=code&scope=snsapi_userinfo&state=" +
+  "8".repeat(32) +
+  "#wechat_redirect"
 const QQ_AUTH_URL = "https://graph.qq.com/oauth2.0/authorize?display=mobile&client_id=1903794758"
 
 const wxHtml = formPage({ loginType: "WX", token: TOKEN, authorizeUrl: WX_AUTH_URL })
@@ -92,7 +93,7 @@ test("微信页：步骤块是 4 步 ordered list，覆盖分享到登录全链�
 
 // ── 微信页：既有回退一个不删 ───────────────────────────────────────────
 
-test("微信页：weixin:// 唤起、copyWxUrl、copyAndGo、wx-copy-btn、系统浏览器兜底全保留", () => {
+test("微信页：weixin:// 唤起、copyWxUrl、copyAndGo、wx-copy-btn 全保留（系统浏览器兜底已移除）", () => {
   assert.match(wxHtml, /href="weixin:\/\//)
   assert.match(wxHtml, /onclick="return copyAndGo\(\)"/)
   assert.match(wxHtml, /function copyAndGo\(/)
@@ -100,11 +101,18 @@ test("微信页：weixin:// 唤起、copyWxUrl、copyAndGo、wx-copy-btn、系�
   assert.match(wxHtml, /onclick="copyWxUrl\(\)"/)
   assert.match(wxHtml, /id="wx-copy-btn"/)
   assert.match(wxHtml, /<input[^>]*id="wx-auth-url"/)
-  assert.match(wxHtml, /备用：用系统浏览器打开授权页/)
+  assert.match(wxHtml, /必须在微信里打开/, "网页授权链接必须强调微信内打开")
+  assert.doesNotMatch(wxHtml, /备用：用系统浏览器打开授权页/, "网页授权在系统浏览器打不开，兜底链接已移除")
   assert.match(wxHtml, /一台手机扫不了自己的码/)
   assert.match(wxHtml, /点下面的按钮唤起微信/, "第 1 步备用文案必须与 weixin:// 按钮真实行为一致")
   assert.match(wxHtml, /同时把授权链接复制到剪贴板/)
   assert.match(wxHtml, /<textarea/, "粘贴框仍在")
+})
+
+test("微信页：授权输入框回显网页授权地址（oauth2/authorize，不是扫码页）", () => {
+  assert.match(wxHtml, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "回显网页授权链接")
+  assert.match(wxHtml, /scope=snsapi_userinfo/)
+  assert.doesNotMatch(wxHtml, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect/, "不许回显扫码页")
 })
 
 test("微信页：带 error 重渲染时分享主路径与步骤块仍在（可重试）", () => {
