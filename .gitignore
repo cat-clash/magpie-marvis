@@ -1,0 +1,30 @@
+node_modules/
+*.tgz
+*.log
+.DS_Store
+_*.mjs
+magpie-plugin-contract-full.txt
+
+# 会话棋谱（本地参考，体积大，不进包也不进仓库）
+kifu/
+
+# 临时实测脚本（含真实凭据的探针，绝不进仓库）
+tmp/
+
+# Marvis 客户端二进制 / 设备指纹：从本机提取，不要提交到公开仓库
+native/*.node
+native/*.dll
+native/qimei36.txt
+native/qimei.txt
+
+# 本地打包/提取物，不入仓库
+*.zip
+*.apk
+
+# 本机上传说明，不入公开仓库
+UPLOAD.md
+# credentials / captures (never commit)
+native/
+handshake.log
+frames.log
+*.log

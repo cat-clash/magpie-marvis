@@ -1,0 +1,7 @@
+{
+  "_说明": "本地网关模式配置（手机 magpie 壳用这个文件， PC 也可用环境变量覆盖）。把本文件复制到 ~/.magpie-marvis-native/gateway.json 即开启 gateway 通道。mode: gateway=走本地网关 / off=PC HTTP 直连 / openclaw=WS；url: 本地 OpenAI 兼容网关地址；key: 网关的 Bearer key（网关没建 key 就留空）；timeoutMs: 单请求超时。",
+  "mode": "gateway",
+  "url": "http://127.0.0.1:8088/v1",
+  "key": "",
+  "timeoutMs": 600000
+}

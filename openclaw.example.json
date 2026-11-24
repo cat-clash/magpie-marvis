@@ -1,0 +1,4 @@
+{
+  "mode": "off",
+  "_说明": "PC 端默认推荐：HTTP 直连（2026-11-24 实测 200，零模拟器依赖）。出票资产放稳定目录（用户环境变量 MARVIS_NATIVE_DIR 指向，如 C:\\Users\\c\\.magpie-marvis-native，含 beacon_napi.node/beacon_sdk.dll/beacon_wrapper.dll/qimei.dll/qimei_napi.node），跨插件更新免疫。备选：mode=remote 需把手机会话握手抓成 handshakeFile 指向的文件（sessionId/token/Host 三行，凭据短命 ≈15-20 分钟）；mode=relay 需 PC 版 Marvis 客户端在跑（本地网关 10123）"
+}

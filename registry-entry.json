@@ -1,0 +1,12 @@
+{
+  "package": "magpie-marvis-final",
+  "version": "0.7.3",
+  "name": "腾讯 Marvis Final TENCENT",
+  "providers": [
+    "marvis"
+  ],
+  "summary": {
+    "en": "The final magpie / OpenCode provider plugin for Tencent Marvis: DeepSeek V4.1 Flash / V4 Pro, Claude Sonnet/Opus 4.6, GPT-5.4, Hy3 and HY-Vision 2.0. Three transports — a local OpenAI-compatible gateway (default, cross-platform; on phone run the Python gateway under Termux/PRoot), PC HTTP direct with per-request Beacon uskey signing, and openclaw WebSocket. Risk-cooldown breaker, 4100406 Chinese first-line guard. Works on PC and phone through the local gateway; QQ / WeChat login, no key pasting.",
+    "zh": "Marvis 最终版 magpie / OpenCode 供应商插件：把腾讯 Marvis 背后的 DeepSeek V4.1 Flash、V4 Pro、Hy3、Claude Sonnet/Opus 4.6、GPT-5.4、HY-Vision 2.0 接进 magpie。三种传输：本地 OpenAI 兼容网关（默认推荐，跨平台；手机在 Termux / PRoot 里跑 Python 网关即可用）、PC HTTP 直连（每请求 Beacon 现签 uskey）、openclaw WebSocket。内置风控熔断冷却、4100406 官方中文首行护栏。PC 与手机通用（手机走本地网关），QQ / 微信登录，不用粘贴 key。"
+  }
+}
