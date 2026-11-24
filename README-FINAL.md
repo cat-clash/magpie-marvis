@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.7.0 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.7.4 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -107,21 +107,39 @@ node tools/extract-native.mjs    # 从 Program Files\Tencent\Marvis\Application\
 > 会原样交给插件的 `callback(code)`。
 >
 > QQ 登录另外用 `mqqapi://forward/url` 真正唤起手机 QQ App（`display=mobile` 只影响网页版布局，
-> 不会唤起 App）；微信是「网站应用扫码登录」页，手机上只能**长按二维码 → 识别图中二维码**。
+> 不会唤起 App）；微信侧**已改为唤起微信 App 本身**：微信没有带 URL 参数的 scheme，
+> 页面主按钮是 `weixin://`，真正的授权链接靠「复制授权链接 → 粘到微信「文件传输助手」→ 在微信内点开 →
+> 点「允许」」完成。**不要再保存二维码图片去扫**（一台手机扫不了自己的码）。
 
 手机登录 4 步：
 
 1. 供应商 `marvis` → 添加账号 → 点 **QQ 登录 / 微信登录**（手机端排在最前；「本地网关（免登录）」占位账号在真登录之后）。
-2. 点宿主给出的「打开浏览器」按钮 —— QQ 会唤起已装的手机 QQ（没装则网页版登录）；微信显示二维码，
-   **长按二维码 → 识别图中二维码**跳进微信授权。
+2. 点宿主给出的「打开浏览器」按钮 —— QQ 会唤起已装的手机 QQ（没装则网页版登录）；
+   微信会打开本地登录页，点「唤起微信 App 授权」后用「复制授权链接」把链接发到微信里打开，点「允许」。
 3. 授权完成后浏览器停在 `yybadaccess…` 回调地址（页面可能是空白/报错，**这是预期**），把地址栏整条复制。
 4. 粘贴到登录界面里的 **Code 输入框**提交。若该壳版本没有这个输入框，登录提示里还给了一个
-   本机登录页地址（`http://127.0.0.1:4618/`），上面有「唤起 QQ 按钮 + 粘贴框」，照样能走通
+   本机登录页地址（`http://127.0.0.1:4618/`），上面有「唤起按钮 + 复制链接 + 粘贴框」，照样能走通
    （失败可在同一页重试，10 分钟超时）。
 
 gateway 通道仍然推荐（账号池在网关侧维护），但**不再是手机唯一的出路**——想单独用手机 magpie 的，
 直接按上面 4 步登录即可。仍然**不要折腾 adb+frida 抓 handshake.log**（凭据 15–20 分钟就失效，
 那条 remote 路不适合手机）。
+
+#### 账号管不动？用 CLI 取消登录 / 移除（0.7.4 新增）
+
+壳上「第一个账号删不掉」是宿主侧的限制，插件侧给了等价出口：直接改 magpie 的账号表
+（`~/.config/magpie/plugin-auth.json`，或 `$MAGPIE_CONFIG`）。**改之前先完全退出 magpie，改完重启。**
+
+```sh
+node scripts/cli.mjs accounts list                 # 看 key / 卡片名 / QQ·微信 / 状态
+node scripts/cli.mjs accounts logout  <key|uid|卡片名>   # 取消登录状态（保留卡片，重新登录可复用）
+node scripts/cli.mjs accounts remove  <key|uid|卡片名>   # 直接移除这条账号
+```
+
+- 追加 `--dry-run` 只看改动、`--yes` 免确认（非交互环境必须带）、`--all` 批量取消登录（`remove` 不支持 `--all`）。
+- 取消登录 = 清空 `access`/`refresh` + `expires` 拨到过去 + 打 `metadata.revokedAt`：
+  插件随即回 `401 + X-Magpie-Sign-In: expired`，magpie 上显示「需要重新登录」，不会再拿着空 token 出网。
+- 写盘前自动留 `plugin-auth.json.bak-<时间戳>`，并做并发校验：检测到 magpie 正在写回该文件就放弃本次操作。
 
 ### 最快路径：下载 phone-kit 附件，一条命令（gateway 通道）
 

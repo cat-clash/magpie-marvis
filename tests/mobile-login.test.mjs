@@ -2,7 +2,7 @@
 //
 // 覆盖「手机点 QQ / 微信登录唤不起」的三个根因对应的修复：
 //   ① QQ 授权页在手机上必须是 display=mobile（否则渲染 PC 表单，不唤起 App）
-//   ② 微信是 PC 扫码页，instructions 必须教「长按识别二维码」
+//   ② 微信是 PC 扫码页，instructions 与登录页必须教「唤起微信 App + 复制授权链接到微信里打开」
 //   ③ 壳的粘贴补丁按包名打，本插件包名不匹配 → 自带 127.0.0.1 表单页，不依赖壳
 //
 // 跑法：node --test tests/mobile-login.test.mjs
@@ -88,10 +88,12 @@ test("authorizeUrl：微信两条路都不加 display（qrconnect 没有这个�
 
 // ── instructions ───────────────────────────────────────────────────────
 
-test("mobileInstructions：微信必须教「长按识别二维码」（否则手机上无法唤起微信）", () => {
+test("mobileInstructions：微信教「唤起微信 App + 在微信里打开链接」，不再教保存二维码扫码", () => {
   const s = mobileInstructions("WX")
-  assert.match(s, /长按/)
-  assert.match(s, /识别图中二维码/)
+  assert.match(s, /唤起微信/)
+  assert.match(s, /复制授权链接/)
+  assert.match(s, /不要.*二维码/, "要明确说不要保存二维码图片扫码")
+  assert.doesNotMatch(s, /识别图中二维码/, "手机上不再依赖长按识别二维码")
 })
 
 test("mobileInstructions：QQ 说明会唤起 App 或走手机版网页", () => {
@@ -212,11 +214,13 @@ function fakeServer(url = "http://127.0.0.1:4618/") {
   })
 }
 
-test("mobileOauthLogin：微信 authorize 走 qrconnect，instructions 教长按识别", async () => {
+test("mobileOauthLogin：微信 authorize 走 qrconnect，instructions 教唤起微信 App", async () => {
   const m = mobileOauthLogin({ loginType: "WX", toAuth: (a) => a, startServer: fakeServer() })
   const r = await m.authorize()
   assert.match(r.url, /open\.weixin\.qq\.com\/connect\/qrconnect/)
-  assert.match(r.instructions, /识别图中二维码/)
+  assert.match(r.instructions, /唤起微信/)
+  assert.match(r.instructions, /复制授权链接/)
+  assert.doesNotMatch(r.instructions, /识别图中二维码/)
 })
 
 test("mobileOauthLogin：authorize 阶段就把本地页地址写进 instructions（兜底入口）", async () => {
@@ -236,6 +240,35 @@ test("mobileOauthLogin：authorize 阶段就把本地页地址写进 instruction
   // 主 URL 是授权页（交给系统浏览器才有权限处理 App 唤起）
   assert.match(r.url, /^https:\/\/graph\.qq\.com\//)
 })
+
+test("mobileOauthLogin：cancel() 释放本地登录页端口（用户放弃授权 / 换登录方式）", async () => {
+  let pageUrl = ""
+  const m = mobileOauthLogin({
+    loginType: "QC",
+    timeoutMs: 60_000,
+    toAuth: (a) => a,
+    onPage: (u) => {
+      pageUrl = u
+    },
+  })
+  const r = await m.authorize()
+  assert.match(pageUrl, /^http:\/\/127\.0\.0\.1:\d+\/$/, "authorize 阶段必须已经起好本地兜底页")
+  const alive = await fetch(pageUrl).then(
+    (res) => (res.ok ? "OPEN" : `HTTP_${res.status}`),
+    () => "CLOSED",
+  )
+  assert.equal(alive, "OPEN", "cancel 之前页面必须可访问")
+
+  await r.cancel()
+  const after = await fetch(pageUrl).then(
+    () => "STILL_OPEN",
+    () => "CLOSED",
+  )
+  assert.equal(after, "CLOSED", "cancel 之后端口必须释放，否则反复进出登录页会攒一堆监听句柄")
+  // close 幂等：callback 的 finally 里还会再 close 一次，不能因此抛错
+  await r.cancel()
+})
+
 
 test("mobileOauthLogin：宿主给了粘贴内容时走标准换取（不再等本地页）", async () => {
   // 注入一个"永远不 resolve"的本地服务：若实现错误地走本地页，测试会超时失败
@@ -359,6 +392,9 @@ test("methods：手机环境 —— 三个入口都在（QQ / 微信 / 浏览器
       assert.ok(realLogins.length >= 4, `手机端应至少 4 个入口（QQ/微信/浏览器粘贴×2），实际 ${realLogins.length}`)
       for (const m of realLogins) {
         const r = await m.authorize()
+        // authorize() 会真起本地兜底登录页（默认 10 分钟超时）。测试不走完 callback，
+        // 必须显式 cancel 释放句柄，否则 node --test 要拖到超时才退出。
+        await r.cancel?.()
         assert.equal(r.method, "code", `${m.label} 必须 method:"code"，否则壳不渲染粘贴输入框`)
         assert.notEqual(r.opened, true, `${m.label} 不能 opened:true，否则壳藏掉「打开浏览器」按钮`)
       }
@@ -422,6 +458,7 @@ test("methods：桌面端隔离浏览器路径不受手机端改动影响（open
       assert.equal(desktop.length, 2)
       for (const m of desktop) {
         const r = await m.authorize()
+        await r.cancel?.()
         assert.equal(r.opened, true, `${m.label} 桌面端必须 opened:true（自己开隔离浏览器）`)
         assert.equal(r.method, "auto", `${m.label} 桌面端必须 method:"auto"（CDP 自动拦截）`)
       }
@@ -437,6 +474,7 @@ test("手机端 QQ 授权页用 display=mobile（否则渲染 PC 表单、不唤
       const list = methods()
       const qq = list.find((m) => /^QQ 登录$/.test(m.label))
       const r = await qq.authorize()
+      await r.cancel?.()
       const u = new URL(r.url)
       assert.equal(u.host, "graph.qq.com")
       assert.equal(u.searchParams.get("display"), "mobile", "手机端 QQ 必须 display=mobile")
@@ -451,6 +489,11 @@ test("qqAppLaunchUrl：mqqapi://forward/url 能唤起手机 QQ App", async () =>
   assert.match(u, /^mqqapi:\/\/forward\/url\?url=/, "必须用 QQ 互联的转发 scheme")
   // 目标地址必须被完整编码（里面有 ? & = 直接拼会被截断）
   assert.equal(new URL(u).searchParams.get("url"), https)
+})
+
+test("wxAppLaunchUrl：weixin:// 唤起微信本体（不带假 URL，授权链接靠复制粘贴）", async () => {
+  const { wxAppLaunchUrl } = await import("../src/marvis/mobile-login.mjs")
+  assert.equal(wxAppLaunchUrl(), "weixin://")
 })
 
 test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", async () => {
@@ -477,7 +520,7 @@ test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", a
   }
 })
 
-test("本地登录页：微信页给「长按识别二维码」提示，且不用假的 scheme", async () => {
+test("本地登录页：微信页给「唤起微信 + 复制授权链接」，不用假的 scheme", async () => {
   const { startPasteServer } = await import("../src/marvis/mobile-login.mjs")
   const authUrl = "https://open.weixin.qq.com/connect/qrconnect?appid=x"
   const s = await startPasteServer({
@@ -489,8 +532,20 @@ test("本地登录页：微信页给「长按识别二维码」提示，且不�
   })
   try {
     const html = await (await fetch(s.url)).text()
-    assert.match(html, /识别图中二维码/, "微信页必须教长按识别二维码")
+    assert.match(html, /href="weixin:\/\//, "唤起微信必须是主按钮上的真链接（不是页面里随便一处字样）")
+    assert.match(html, /复制授权链接/, "微信页必须有复制授权链接按钮")
+    assert.match(html, /onclick="copyWxUrl\(\)"/, "复制按钮必须挂上脚本，不能只是文案")
+    assert.match(html, /function copyWxUrl\(/, "复制脚本本体必须在页面里")
+    assert.match(html, /<input[^>]*id="wx-auth-url"/, "必须有可复制的授权链接输入框本体")
+    assert.match(html, /id="wx-copy-btn"/, "复制按钮要有稳定 id，别靠 DOM 位置猜")
+    assert.match(html, /getElementById\('wx-copy-btn'\)/, "「已复制 ✓」的回写必须按 id 定位按钮")
+    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect/, "输入框必须回显本次授权页地址")
+    assert.match(html, /一台手机扫不了自己的码/, "必须明说不要走保存图片扫码那条链路")
+    assert.match(html, /备用：用系统浏览器打开授权页/, "必须保留系统浏览器兜底链接")
     assert.doesNotMatch(html, /mqqapi:\/\//, "微信页不该用 QQ 的 scheme")
+    assert.doesNotMatch(html, /识别图中二维码/, "微信页不再教长按识别二维码")
+    assert.match(html, /点下面的按钮唤起微信/, "第 1 步文案必须与按钮真实行为一致（只唤起，不完成授权）")
+    assert.doesNotMatch(html, /点下面的按钮完成微信授权/, "点一下不会完成授权，别写这种误导句")
     assert.match(html, /<textarea/, "同样要有粘贴框")
   } finally {
     s.close()

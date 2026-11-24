@@ -410,8 +410,8 @@ export function methods() {
     manualPasteLogin(
       "WX",
       "微信登录（浏览器 · 粘贴回调地址）",
-      "1) 点上面的按钮用手机浏览器打开微信授权页（长按二维码 → 识别图中二维码）\n" +
-        "2) 扫码并确认后，浏览器停在 `yybadaccess.3g.qq.com/…marvis_oauth?login_type=WX&code=…`\n" +
+      "1) 点上面的按钮唤起微信 App，再「复制授权链接」粘贴到微信「文件传输助手」里打开（不要再保存二维码图片扫码）\n" +
+        "2) 在微信里点「允许」授权后，浏览器停在 `yybadaccess.3g.qq.com/…marvis_oauth?login_type=WX&code=…`\n" +
         "3) 长按地址栏 → 全选 → 复制，把那条地址整条粘贴到下面的输入框",
       { mobile: true },
     ),

@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.3）
+# 腾讯 Marvis · magpie 供应商插件（0.7.4）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.3）
+## 传输通道（0.7.4）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|

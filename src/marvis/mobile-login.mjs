@@ -25,12 +25,16 @@
 //
 // ═══ 三个真实原因（缺一条都修不好）══════════════════════════════════
 //
-// 1. **微信授权页是 PC 扫码页**
-//    `open.weixin.qq.com/connect/qrconnect?scope=snsapi_login` 是「网站应用扫码登录」。
-//    手机上打开它只会看到一个二维码 —— 需要**另一台设备**来扫。用户点登录 → 一张二维码 →
-//    没有下一步，于是报「唤不起微信」。
-//    → 手机上唯一能唤起微信的动作是**长按二维码 → 识别图中二维码**（微信内置浏览器识别后
-//      继续走 open.weixin.qq.com 的授权流）。instructions 必须教这一步，光给个链接没用。
+// 1. **微信授权页是 PC 扫码页，但扫码不是手机上的出路**
+//    `open.weixin.qq.com/connect/qrconnect?scope=snsapi_login` 是「网站应用扫码登录」，
+//    系统浏览器打开它只显示二维码 —— 需要**另一台设备**来扫；一台手机完成不了「扫自己的码」，
+//    保存二维码图片再扫的链路微信已逐步收紧。
+//    → 手机上的正确出路是**唤起微信 App，把授权链接在微信内置浏览器里打开**：微信内置
+//      浏览器打开 qrconnect 链接时不会显示二维码，而是直接弹「确认授权」页（微信自己有
+//      登录态）。所以 instructions 的核心动作是「唤起微信 + 复制链接到微信里打开」，
+//      **不再教保存/识别二维码**。扫码只作为系统浏览器打开后的极端兜底。
+//    ⚠ 微信没有 QQ 那种 `mqqapi://forward/url`（携带任意 URL 唤起 App 授权）的通用
+//      scheme；`weixin://` 只能唤起微信本体，授权页地址要靠用户复制到微信里打开。
 //
 // 2. **QQ 授权页被 `display=pc` 钉死为 PC 版**
 //    `graph.qq.com/oauth2.0/authorize?...&display=pc` 在手机浏览器里渲染 PC 布局的
@@ -126,22 +130,38 @@ export function qqAppLaunchUrl(authorizeUrl) {
 }
 
 /**
- * 唤起微信的提示 —— 微信没有通用的「带 URL 唤起微信」协议。
+ * 唤起微信的链接 —— 微信没有「带 URL 唤起微信授权」的通用 scheme。
  *
- * `open.weixin.qq.com/connect/qrconnect` 是**网站应用扫码登录**页，手机浏览器打开
- * 只显示二维码。能真正走通微信授权的两种办法：
- *   ① 在浏览器菜单里选「在微信中打开」/「分享到微信 → 在微信中打开」（推荐，直接唤起微信 App 授权）；
- *   ② 长按授权页上的二维码 →「识别图中二维码」（适用于仍显示二维码的页面）。
- * 目前部分手机浏览器已移除「下载二维码图片后用微信扫一扫」的链路；本插件不引导保存二维码图片，
- * 而是引导用户把授权链接交给微信 App 或在微信内打开。
- * 所以这里只给提示 + 链接，不给假的 scheme。
+ * `weixin://` 只能唤起微信 App 本体；授权页地址（qrconnect）要用户复制后
+ * 在微信内置浏览器里打开 —— 那里面打开 qrconnect 不会显示二维码，而是直接
+ * 弹「确认授权」页（微信自己带登录态），一台手机就能完成。
+ * 页面必须同时给「复制授权链接」按钮，否则用户唤起微信后不知道去哪找链接。
+ *
+ * @returns {string}
+ */
+export function wxAppLaunchUrl() {
+  return "weixin://"
+}
+
+/**
+ * 微信授权提示 —— 手机上的出路是「唤起微信 App + 在微信内打开授权链接」。
+ *
+ * `open.weixin.qq.com/connect/qrconnect` 是**网站应用扫码登录**页，系统浏览器打开
+ * 只显示二维码，需要另一台设备扫；保存图片再扫的链路微信已收紧，一台手机完成不了。
+ * 正确做法：
+ *   ① 点「唤起微信」按钮（`weixin://`）打开微信 App；
+ *   ② 点「复制授权链接」，粘贴到微信「文件传输助手」（或任意聊天）并发送；
+ *   ③ 在微信里点开这条链接 —— 微信内置浏览器会直接显示「确认授权」页（不是二维码）；
+ *   ④ 点「允许」完成授权。
+ * 不再引导保存/识别二维码图片。
  *
  * @returns {string}
  */
 export const WECHAT_OPEN_HINT =
-  "手机上优先让微信 App 来授权：点下面的授权按钮后，在浏览器菜单里选「在微信中打开」" +
-  "（或「分享 → 微信 → 在微信中打开」）。如果页面仍显示二维码，再长按二维码 → 识别图中二维码。" +
-  "不要保存二维码图片再扫。"
+  "微信授权请直接唤起微信 App 完成，不要再保存二维码图片扫码（一台手机扫不了自己的码）：" +
+  "先点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，" +
+  "在微信里点开它就会弹出「确认授权」页，点「允许」即可。若按钮没反应，长按复制下面链接" +
+  "手动粘贴到微信里打开。"
 
 /** 手机端页面外壳：中文、移动端 viewport、深色模式友好、不引任何外部资源 */
 function page(title, body) {
@@ -199,10 +219,10 @@ function page(title, body) {
 export function mobileInstructions(loginType) {
   if (loginType === "WX") {
     return [
-      "1) 点上面的按钮用手机浏览器打开微信授权页（不要保存二维码图片）",
-      "2) 首选：在浏览器菜单里选「在微信中打开」/「分享 → 微信 → 在微信中打开」，让微信 App 来完成授权",
-      "3) 备用：如果页面仍显示二维码，长按二维码，选「识别图中二维码」",
-      "4) 在微信里确认授权后回到浏览器，浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
+      "1) 点上面的「唤起微信」按钮打开微信 App（不要再保存二维码图片扫码）",
+      "2) 点「复制授权链接」，把链接粘贴到微信「文件传输助手」（或任意聊天）并发送",
+      "3) 在微信里点开这条链接，微信内置浏览器会直接弹出「确认授权」页",
+      "4) 点「允许」完成授权，浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
       "5) 长按地址栏 → 全选 → 复制，把那条地址整条**粘贴到下面的 Code 输入框**提交",
     ].join("\n")
   }
@@ -218,7 +238,8 @@ export function mobileInstructions(loginType) {
  * 本地登录页正文。
  *
  * ⚠⚠ 页面上必须有**两个**可点的东西，缺一个这条登录路就废了：
- *   ① 「用 QQ / 微信登录」按钮 —— 直接打开授权页（QQ 走 mqqapi:// 唤起 App）；
+ *   ① 首要按钮 —— QQ 走 mqqapi:// 直接把授权页转发给手机 QQ；微信没有带 URL 的 scheme，
+ *      只能 weixin:// 唤起微信本体，授权链接靠下面的「复制授权链接」粘进微信里打开；
  *   ② 粘贴框 + 「完成登录」按钮 —— 授权完成后浏览器停在一条 yybadaccess 地址上，
  *      用户把它整条贴回来。
  * 上一版只有 (2) 但没让用户知道要来这里开页面；再上一版只有 instructions 文字，
@@ -229,22 +250,49 @@ function formPage({ loginType, token, error, authorizeUrl: authUrl }) {
   const isWx = loginType === "WX"
   const name = isWx ? "微信" : "QQ"
   const err = error ? `<p class="bad">${esc(error)}</p>` : ""
-  // QQ：mqqapi:// 唤起 App；微信：只有 https 授权页（scheme 不通用）
-  const primaryHref = isWx ? authUrl : qqAppLaunchUrl(authUrl)
-  const primaryText = isWx ? `打开微信授权页（${name}）` : `唤起手机 QQ 登录（${name}）`
+  // QQ：mqqapi:// 唤起 App；微信：weixin:// 唤起微信本体，授权链接靠「复制 + 微信内打开」
+  const primaryHref = isWx ? wxAppLaunchUrl() : qqAppLaunchUrl(authUrl)
+  const primaryText = isWx ? `唤起微信 App 授权（${name}）` : `唤起手机 QQ 登录（${name}）`
   const fallback = isWx
     ? `<p class="muted">${esc(WECHAT_OPEN_HINT)}</p>
-       <a class="secondary" href="${esc(authUrl)}" target="_blank" rel="noreferrer">备用：用系统浏览器重新打开授权页</a>
-       <p class="muted">如果按钮没反应，长按下面这个链接复制地址，再粘贴到系统浏览器地址栏打开：<br>
-       <code>${esc(authUrl)}</code></p>`
+       <p class="muted">复制授权链接（唤起微信后，粘贴到微信「文件传输助手」点开）：</p>
+       <input type="text" id="wx-auth-url" readonly value="${esc(authUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#fff;color:inherit;font:13px/1.4 ui-monospace,monospace">
+       <button type="button" id="wx-copy-btn" onclick="copyWxUrl()">复制授权链接</button>
+        <p class="muted">如果唤起没反应，用系统浏览器打开授权页（扫码兜底，需要另一台设备）：</p>
+       <a class="secondary" href="${esc(authUrl)}" target="_blank" rel="noreferrer">备用：用系统浏览器打开授权页</a>`
     : `<p class="muted">没装手机 QQ 时，用下面的按钮在浏览器里完成网页版登录：<br>
        <a class="alt" href="${esc(authUrl)}" target="_blank" rel="noreferrer">用浏览器打开 QQ 授权页</a></p>`
+
+  const copyScript = isWx
+    ? `<script>
+function copyWxUrl(){
+  const el=document.getElementById('wx-auth-url');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(el.value).then(()=>{flashCopy()},()=>fallbackCopy(el));
+  }else{fallbackCopy(el)}
+}
+function fallbackCopy(el){
+  el.focus();el.select();el.setSelectionRange(0,el.value.length);
+  try{document.execCommand('copy');flashCopy()}catch(e){}
+}
+function flashCopy(){
+  const b=document.getElementById('wx-copy-btn');
+  if(b){const t=b.textContent;b.textContent='已复制 ✓';setTimeout(()=>{b.textContent=t},1500)}
+}
+</script>`
+    : ""
+
+  // 第 1 步的说法必须与按钮真实行为一致：微信按钮只唤起微信本体，授权靠复制链接在微信内打开；
+  // 说「点按钮完成授权」会让人以为点完就结束了，卡在第一步。
+  const step1 = isWx
+    ? `第 1 步：点下面的按钮唤起微信，再「复制授权链接」发到微信里打开，点「允许」完成${esc(name)}授权。`
+    : `第 1 步：点下面的按钮唤起手机 ${esc(name)} 完成授权（没装 App 就用下面的备用按钮走网页版）。`
 
   return page(
     `${name}登录 · 授权并粘贴回调地址`,
     `<h1>${esc(name)}登录</h1>
 ${err}
-<p class="lead">第 1 步：点下面的按钮完成${esc(name)}授权。</p>
+<p class="lead">${step1}</p>
 <a class="primary" href="${esc(primaryHref)}">${esc(primaryText)}</a>
 ${fallback}
 
@@ -258,6 +306,7 @@ ${fallback}
     spellcheck="false" placeholder="把 yybadaccess.3g.qq.com/…marvis_oauth?login_type=…&code=…&state=… 整条粘贴到这里"></textarea>
   <button type="submit">完成登录</button>
 </form>
+${copyScript}
 <p class="muted">这个页面只在本机 127.0.0.1 上，内容不会发到别处。</p>`,
   )
 }
@@ -326,8 +375,8 @@ export async function startPasteServer({
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
         "Referrer-Policy": "no-referrer",
-        // 页面内联样式，禁掉一切外部资源
-        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+        // 页面内联样式/脚本，禁掉一切外部资源
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'",
       })
       res.end(html)
     }
@@ -404,6 +453,10 @@ export async function startPasteServer({
   })
 
   const actualPort = server.address()?.port
+  // ⚠ 监听句柄不参与「保活」：登录页只是等待用户的一次性入口，不该让宿主/CLI 进程
+  //    因为一个没人点的登录页而无法退出（测试里表现为整套要拖到 10 分钟超时）。
+  //    超时定时器同样已 unref（见下）。真正等结果的调用方自己 await paste.wait 即可。
+  server.unref?.()
   const pageUrl = `http://127.0.0.1:${actualPort}/`
 
   const timer = setTimeout(() => {
@@ -551,6 +604,18 @@ export function mobileOauthLogin({
             throw e
           } finally {
             paste.close()
+          }
+        },
+        /**
+         * 用户放弃这次授权（退出登录界面 / 换一种登录方式）时释放本地端口。
+         * 不关掉的话，一个 10 分钟的监听句柄会一直挂着：测试里表现为进程拖到超时才退，
+         * 真机上表现为反复进出登录页攒出一堆占位端口。close 幂等，重复调用无害。
+         */
+        async cancel() {
+          try {
+            paste.close()
+          } catch {
+            /* 已经关了 */
           }
         },
       }

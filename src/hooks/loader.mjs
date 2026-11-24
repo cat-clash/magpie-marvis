@@ -439,6 +439,23 @@ function openclawTransportRequested() {
   return t === "openclaw" || t === "ws" || t === "relay" || t === "remote"
 }
 
+/**
+ * 账号是否被**插件侧**取消过登录（`node scripts/cli.mjs accounts logout` 的落盘形状：
+ * access/refresh 清空 + expires 拨到过去 + metadata.revokedAt 打标）。
+ *
+ * 为什么要单独认这一种：被取消登录的账号既没 access 也没 refresh，走原来的
+ * `return {}` 会让它看起来像「插件没配好」；这里给它一个明确的 401 +
+ * `X-Magpie-Sign-In: expired`（与 :831 登录失效同一条宿主通道），
+ * 壳卡片上直接显示「需要重新登录」，用户知道该干什么。
+ */
+export function revokedByPluginLogout(auth) {
+  if (!auth || typeof auth !== "object") return false
+  const access = String(auth.access ?? auth.key ?? "").trim()
+  const refresh = String(auth.refresh ?? "").trim()
+  if (access || refresh) return false
+  return Boolean(auth.metadata?.revokedAt)
+}
+
 export function loaderHook(input, options = {}) {
   return async (getAuth) => {
     // 先判断是否走本地网关：这条路不需要 magpie 侧的 Marvis 登录态
@@ -450,6 +467,18 @@ export function loaderHook(input, options = {}) {
     const auth = await getAuth()
     const creds = credsOf(auth)
     if (!viaGateway && (!creds.accessToken || !creds.openid)) {
+      // 被 `accounts logout` 取消登录的账号：给壳明确的「需要重新登录」信号，
+      // 不要静默 return {}（那看起来像插件坏了）。
+      if (revokedByPluginLogout(auth)) {
+        return {
+          baseURL: BASE_V1,
+          apiKey: "revoked",
+          fetch: async () =>
+            errorResponse(401, "sign_in_revoked", "该账号已在插件侧取消登录，请在 magpie 里重新登录。", {
+              "X-Magpie-Sign-In": "expired",
+            }),
+        }
+      }
       return {}
     }
 

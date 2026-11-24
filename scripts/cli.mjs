@@ -17,6 +17,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const COMMANDS = {
   check: "check.mjs",
   create: "create.mjs",
+  accounts: "accounts.mjs",
 }
 
 function parseArgs(argv) {
