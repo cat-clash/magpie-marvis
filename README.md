@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.10）
+# 腾讯 Marvis · magpie 供应商插件（0.7.11）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.10）
+## 传输通道（0.7.11）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -35,7 +35,7 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 – 0.7.10 新增（手机上最常用的几条）
+## 0.7.4 – 0.7.11 新增（手机上最常用的几条）
 
 - **微信登录：二维码要放到电脑上看，手机微信扫**（0.7.10 定论）：真机两次被微信打回后才确认 ——
   Marvis 的 appid 是**网站应用**（只有 `snsapi_login` 扫码权限），**不是公众号**，所以
@@ -47,12 +47,15 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 - **不想折腾扫码：直接导入电脑端登录态**（0.7.10）：在电脑 magpie 配置目录的
   `plugin-auth.json` 里把 `marvis#` 开头的条目导出成一个小 JSON，手机 Termux 里跑
   `node scripts/cli.mjs import-login login.json --yes`，会自动备份后合并进手机的
-  `~/.config/magpie/plugin-auth.json`，重启 magpie 就能看到这个账号。实测比扫码省事得多。- **账号管理只有 CLI，不在登录菜单**（0.7.7 调整）：0.7.6 曾在登录菜单加过「账号管理」入口，实测位置不对
+  `~/.config/magpie/plugin-auth.json`，重启 magpie 就能看到这个账号。实测比扫码省事得多。
+- **账号管理只有 CLI，不在登录菜单**（0.7.7 调整）：0.7.6 曾在登录菜单加过「账号管理」入口，实测位置不对
   （没登录时没账号可管、已登录不会去登录菜单找），已撤掉。取消登录/移除账号统一走 Termux：
   `node scripts/cli.mjs accounts list|logout|remove`，写盘前自动备份，操作后重启 magpie 生效。
 - **微信登录加「分享到微信」主路径**（0.7.7）：点首选按钮直接把授权链接送进系统分享面板 → 微信 → 文件传输助手
   → 发送 → 微信里点开 →「确认授权」→「允许」，页面上有完整的 4 步后续说明；不支持分享时回退到
   「唤起微信 + 复制授权链接」。微信没有 QQ 那种能带网址的 scheme，这是平台差异。
+  （0.7.10 起微信主路径改为「复制授权链接 → 电脑浏览器打开出二维码 → 手机微信扫」，「分享到微信」降为可选手段；
+  详见下面的微信条目。）
 - **账号随便取消登录 / 移除**（0.7.4）：`node scripts/cli.mjs accounts list|logout|remove`，
   不再受「第一个账号删不掉」限制；`list --verbose` 看 `expires`/`guid`/字段全集，`--json` 给脚本接管（0.7.5）。
 - **503 一键自愈 + 说清下一步**（0.7.5 / 0.7.7）：`sh ~/.magpie-marvis-native/magpie-marvis-diag.sh --fix`

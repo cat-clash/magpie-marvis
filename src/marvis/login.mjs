@@ -98,21 +98,17 @@ export function wxQrLoginUrl(guid) {
 }
 
 /**
- * 微信「网页授权」入口（0.7.8 新增，0.7.9 修正 scope）—— 手机端优先用这个。
+ * 微信「网页授权」入口（0.7.8 新增）—— **实验/说明用途，不是手机主路径**。
  *
- * ⚠⚠ 两种微信登录的本质区别（实测，别再混用）：
- *   · `connect/qrconnect`（snsapi_login）= **网站应用扫码登录**。授权页是一张二维码，
- *     设计给「PC 显示二维码 + 另一台手机的微信扫」。在手机浏览器/微信里打开，
- *     看到的还是那张码 —— 一台手机扫不了自己屏幕上的码。
- *   · `connect/oauth2/authorize` = **公众号网页授权**。在微信内置浏览器里打开后
- *     直接跳回 redirect_uri 带 code（base 静默）或先弹确认页（userinfo），无需扫码。
+ * ⚠⚠ 0.7.10 真机定论：Marvis 的 appid 是**网站应用**，只有 `snsapi_login`（qrconnect 扫码），
+ *   **不是公众号**。所以 `connect/oauth2/authorize` 无论 scope 是 `snsapi_userinfo`
+ *   （0.7.8）还是 `snsapi_base`（0.7.9），在微信里打开一律报
+ *   「此公众号并没有这些scope的权限，错误码:10005」。**改 scope 解决不了，是 appid 类型问题。**
+ *   手机主路径因此回到 `qrconnect`（见 wxQrLoginUrl）：二维码必须显示在**另一块屏幕**上，
+ *   用这台手机的微信「扫一扫」扫，电脑跳回调后把 code 粘回来。
  *
- * ⚠⚠ 0.7.9 真机实测踩坑：`scope=snsapi_userinfo` 会被微信拒，弹
- *   「此公众号并没有这些scope的权限，错误码:10005」——
- *   10005 的含义是**公众号未认证**，而 snsapi_userinfo 需要已认证服务号才有。
- *   但 `snsapi_base` 是**所有公众号默认具备**的权限（无需认证），
- *   而且我们只需要 code 去 Marvis 服务端换登录态（不要昵称头像），
- *   base 完全够用 → 改用 snsapi_base。
+ * 保留本函数的唯一理由：给用户/运维看清「公众号网页授权这条路对 Marvis 无效」，
+ * 引导页底部把它当灰色说明链接展示。不要把它设成手机主链接。
  *
  * 关键：`#wechat_redirect` 不能省 —— 微信靠这个 fragment 判断在内置浏览器里跳转。
  * 换取端 parseCallback → exchangeCode 只用 code + guid，不挑 scope，直接复用。

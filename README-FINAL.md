@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.7.10 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.7.11 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -60,7 +60,7 @@ MARVIS_TRANSPORT = gateway    ← 默认推荐：本地 OpenAI 兼容网关 http
 - **熔断器**：连续 `MARVIS_RISK_THRESHOLD`（默认 5）次风控后本地拒绝出网，退避改为**指数退避**——
   以 `MARVIS_RISK_COOLDOWN_MS` 为基数按 `base×2^n` 增长，上限 8h，±10% jitter；
   半开状态一次失败**立即重开**，不再等满整个退避周期；状态持久化到 `<稳定资产目录>/breaker-state.json`（重启不丢）；
-  `riskEvents()` 提供事件环形缓冲〔接口形态与保留条数〔待主控核对〕〕。
+  `riskEvents()` 提供事件环形缓冲〔接口形态与保留条数以 `src/marvis/fingerprint.mjs` 的 `riskEvents()` 实现为准〕。
 - **请求节奏闸 pacing**：出站补全请求最小间隔 `MARVIS_MIN_REQUEST_INTERVAL_MS`（默认 `800`）+
   随机抖动 `MARVIS_REQUEST_JITTER_MS`（默认 `400`），压平请求节奏。
 - **随机 uskey 兜底默认关闭（0.7.0 行为变更）**：没有 `native/`、也没有 `MARVIS_USKEY_URL` 时 **fail-fast**
@@ -286,7 +286,7 @@ node scripts/doctor.mjs     # 一键诊断「模型不出字」：逐环查版�
                             # 直接指出挂在哪一环；exit 0=全通，1=有环失败（含修复提示）。
                             # 其中 4100404=上游风控，非配置问题，等解除；切 off/gateway 无效。
                             # 0.7.0 起输出新增 fingerprintStatus / riskEvents 字段
-                            # （fingerprintStatus / riskEvents 的字段名与输出时机〔待主控核对〕）。
+                            # （fingerprintStatus / riskEvents 的字段名与输出时机以 `src/marvis/fingerprint.mjs` 实现为准）。
 node --test                 # 离线测试（MARVIS_TRANSPORT=gateway 注入，不依赖真机/网络）
 node scripts/check.mjs .    # 交付面自检
 ```
