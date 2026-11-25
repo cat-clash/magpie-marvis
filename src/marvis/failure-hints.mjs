@@ -117,7 +117,11 @@ export function probeLocalRelay({ timeoutMs = 1000 } = {}) {
 export function shouldAutoWsFallback({ mobile, mode, autoDisabled, riskStatus }) {
   if (mobile) return false
   if (autoDisabled) return false
-  if (String(mode || "").toLowerCase() === "remote") return false
+  const m = String(mode || "").toLowerCase()
+  // 用户显式关掉 WS 通道（off）时绝不自动回退去连真实 10123：
+  // 否则 HTTP 直连的每次风控/异常都会在 PC 客户端建一条新会话（刷屏根因之一）。
+  if (m === "off") return false
+  if (m === "remote") return false
   if (riskStatus !== 429) return false
   return true
 }

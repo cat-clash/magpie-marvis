@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.8.5 — 2026-11-26
+
+**修复会话刷屏根因：用户显式 off 时仍自动连 10123 建会话**
+
+- **修复（shouldAutoWsFallback 忽略 mode=off）**：HTTP 直连模式下遇到风控/异常，旧版会自动回退到真实 Marvis 10123 网关并发一条新请求，每次都在 PC 客户端建一条新对话。现在 mode=off 显式禁止自动回退（ailure-hints.mjs）；测试文件也加 MARVIS_RISK_AUTO_WS=0 总开关，避免 QA 跑测试时误连真实网关。
+- **QA 测试合入主仓**：qa-e2e(9)、qa-concurrency(9)、qa-persistence(19)、qa-config(41) 共 78 条行为级测试 + regression 报告。
+
 ## 0.8.4 — 2026-11-26
 
 **并发安全、会话防刷屏与指纹可靠性：三项高优先级 + 会话复用 + 六项中优先级优化**
