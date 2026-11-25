@@ -3,16 +3,17 @@
 // 覆盖「手机点 QQ / 微信登录唤不起」的三个根因对应的修复：
 //   ① QQ 授权页在手机上必须是 display=mobile（否则渲染 PC 表单，不唤起 App）
 //   ② 微信是网站应用扫码页：链接要拿到电脑上打开出二维码，手机微信扫（0.7.10）
-//      0.7.8 起手机端微信授权链接改用「网页授权」(oauth2/authorize + snsapi_base)：
-//      在微信内打开直接跳回带 code，一台手机完成；0.7.9 修 10005（userinfo→base）。
-//   ③ 壳的粘贴补丁按包名打，本插件包名不匹配 → 自带 127.0.0.1 表单页，不依赖壳
+//      0.7.8/0.7.9 试过「网页授权」(oauth2/authorize + userinfo/base) 全被微信回 10005
+//      —— appid 是网站应用不是公众号，那条路对 Marvis 无效，只留作实验链接。
+//   ③ 壳的粘贴补丁按包名打，本插件包名不匹配 → 自带 127.0.0.1 引导页，不依赖壳。
+//      0.7.12 起引导页只给链接和步骤、不放粘贴框：粘贴必须回到壳的 Code 输入框。
 //
 // 跑法：node --test tests/mobile-login.test.mjs
 
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { isMobile, mobileInstructions, startPasteServer, mobileOauthLogin } from "../src/marvis/mobile-login.mjs"
+import { isMobile, mobileInstructions, startPasteServer, mobileOauthLogin, exchangeFromPaste } from "../src/marvis/mobile-login.mjs"
 import { authorizeUrl, wxWebAuthUrl, wxQrLoginUrl, extractCode, stateOf } from "../src/marvis/login.mjs"
 
 /** 与真实换取同形的回调地址（不联网：只测到 code/state 解析与表单流程） */
@@ -161,23 +162,25 @@ test("mobileInstructions：两条都要求复制地址栏整条地址", () => {
 
 // ── 本地粘贴表单服务 ───────────────────────────────────────────────────
 
-test("startPasteServer：GET 返回可在手机上打开的表单页，且只绑 127.0.0.1", async () => {
+test("startPasteServer：GET 返回可在手机上打开的引导页，且只绑 127.0.0.1", async () => {
   const s = await startPasteServer({ loginType: "QC", guid: "e".repeat(32), port: 0, timeoutMs: 5000 })
   try {
     assert.match(s.url, /^http:\/\/127\.0\.0\.1:\d+\/$/)
     const res = await fetch(s.url)
     assert.equal(res.status, 200)
     const html = await res.text()
-    assert.match(html, /<textarea/, "要有粘贴框")
-    assert.match(html, /name="callback"/)
-    assert.match(html, /name="t" value="[0-9a-f]{32}"/, "要有一次性 token")
     assert.match(html, /viewport/, "手机页面必须有 viewport")
+    // 0.7.12：页面不再收粘贴 —— 没有 textarea、没有「完成登录」按钮、也不再输出 token
+    assert.doesNotMatch(html, /<textarea/, "0.7.12 起本机引导页不放粘贴框")
+    assert.doesNotMatch(html, /完成登录/, "0.7.12 起本机引导页没有「完成登录」按钮")
+    assert.doesNotMatch(html, /name="t"/, "页面不再暴露一次性 token")
+    assert.match(html, /Code<\/strong>/, "要引导用户回 magpie 的 Code 输入框")
   } finally {
     s.close()
   }
 })
 
-test("startPasteServer：错误 token 被拒绝（防本机其他程序乱 POST）", async () => {
+test("startPasteServer：POST /submit 已停用（页面不收粘贴，直接 410）", async () => {
   const s = await startPasteServer({ loginType: "QC", guid: "f".repeat(32), port: 0, timeoutMs: 5000 })
   try {
     const res = await fetch(`${s.url}submit`, {
@@ -185,29 +188,27 @@ test("startPasteServer：错误 token 被拒绝（防本机其他程序乱 POST�
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ t: "0".repeat(32), callback: fakeCallback() }).toString(),
     })
-    assert.equal(res.status, 403)
+    assert.equal(res.status, 410, "即使带对 token 也不在页面侧换登录态")
+    assert.match(await res.text(), /不接收粘贴/)
+    // 引导页本身仍然可用
+    assert.equal((await fetch(s.url)).status, 200)
   } finally {
     s.close()
   }
 })
 
-test("startPasteServer：没有 code 的粘贴内容被拒绝，且页面仍可用（可重试）", async () => {
+test("startPasteServer：传合法粘贴内容也不会消耗 code（410，不换登录态）", async () => {
   const s = await startPasteServer({ loginType: "QC", guid: "1".repeat(32), port: 0, timeoutMs: 5000 })
   try {
-    // 从表单页里抠出 token
     const html = await (await fetch(s.url)).text()
-    const token = /name="t" value="([0-9a-f]{32})"/.exec(html)[1]
-
+    // 页面已不输出 token；随便给一个，服务端一律 410 —— 关键是不发换取请求
     const bad = await fetch(`${s.url}submit`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ t: token, callback: "https://example.com/nothing" }).toString(),
+      body: new URLSearchParams({ t: /name="t" value="([0-9a-f]{32})"/.exec(html)?.[1] ?? "1".repeat(32), callback: fakeCallback() }).toString(),
     })
-    assert.equal(bad.status, 400)
-    assert.match(await bad.text(), /没有 code/)
-
-    // 页子还在，用户可以再贴一次
-    assert.equal((await fetch(s.url)).status, 200)
+    assert.equal(bad.status, 410)
+    assert.match(await bad.text(), /回到.*magpie|magpie 的登录界面/)
   } finally {
     s.close()
   }
@@ -350,46 +351,42 @@ test("mobileOauthLogin：宿主给了粘贴内容时走标准换取（不再等�
   assert.match(String(out), /^(EXCHANGED|ERR:登录失败)/, `应走上游换取，实际 ${out}`)
 })
 
-test("mobileOauthLogin：callback 等超时会带上重试入口", async () => {
+test("mobileOauthLogin：callback 没拿到粘贴内容时立即报错，指向 magpie 的 Code 输入框（0.7.12 不再等本地页）", async () => {
+  let closed = 0
   const m = mobileOauthLogin({
     loginType: "QC",
-    timeoutMs: 100,
+    timeoutMs: 5000,
     toAuth: (a) => a,
     startServer: async () => ({
       url: "http://127.0.0.1:9999/",
-      wait: Promise.reject(new Error("粘贴的内容里没有 code")),
-      close() {},
+      wait: new Promise(() => {}),
+      close() {
+        closed += 1
+      },
     }),
   })
   const r = await m.authorize()
+  const started = Date.now()
   await assert.rejects(r.callback(), (err) => {
-    assert.match(err.message, /没有 code/)
-    assert.match(err.message, /重试入口/)
+    assert.match(err.message, /没有收到回调地址/)
+    assert.match(err.message, /Code 输入框/)
     assert.match(err.message, /127\.0\.0\.1:9999/)
     return true
   })
+  assert.ok(Date.now() - started < 1000, "不该再白等本地页超时")
+  assert.equal(closed, 1, "报错前要把本地页关掉")
 })
 
-test("mobileOauthLogin：成功后把 guid / loginType 补齐再交给 toAuth", async () => {
-  let received = null
-  const m = mobileOauthLogin({
-    loginType: "QC",
-    toAuth: (a) => {
-      received = a
-      return { type: "success", access: a.accessToken }
-    },
-    startServer: async () => ({
-      url: "http://127.0.0.1:9998/",
-      wait: Promise.resolve({ openid: "ABCD1234", accessToken: "tok", loginType: "1" }),
-      close() {},
+test("exchangeFromPaste：空内容 / 没有 code / 没有 state 都给出可读错误", async () => {
+  await assert.rejects(exchangeFromPaste("", { loginType: "QC", guid: "a".repeat(32) }), /没有收到回调地址/)
+  await assert.rejects(exchangeFromPaste("https://example.com/nothing", { loginType: "QC", guid: "a".repeat(32) }), /没有 code/)
+  await assert.rejects(
+    exchangeFromPaste("https://yybadaccess.3g.qq.com/marvis_client_login/marvis_oauth?login_type=QC&code=abc", {
+      loginType: "QC",
+      guid: "a".repeat(32),
     }),
-  })
-  const r = await m.authorize()
-  const out = await r.callback()
-  assert.equal(out.type, "success")
-  assert.equal(received.openid, "ABCD1234")
-  assert.match(received.guid, /^[0-9a-f]{32}$/, "guid 必须补齐（换取时绑定的就是它）")
-  assert.equal(received.loginType, "1")
+    /没有 state/,
+  )
 })
 
 // ── 解析器回归（手机端粘贴的内容形态）────────────────────────────────
@@ -549,7 +546,7 @@ test("wxAppLaunchUrl：weixin:// 唤起微信本体（不带假 URL，授权链�
   assert.equal(wxAppLaunchUrl(), "weixin://")
 })
 
-test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", async () => {
+test("本地登录页：QQ 页给「唤起 QQ 按钮」+ 网页版兜底 + 回壳粘贴指引", async () => {
   const { startPasteServer } = await import("../src/marvis/mobile-login.mjs")
   const authUrl = "https://graph.qq.com/oauth2.0/authorize?display=mobile&client_id=1903794758"
   const s = await startPasteServer({
@@ -565,9 +562,9 @@ test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", a
     assert.match(html, /mqqapi:\/\/forward\/url/, "页面必须有唤起 QQ App 的入口")
     // 没装 QQ 时的网页版兜底
     assert.match(html, /用浏览器打开 QQ 授权页/, "必须有网页版兜底链接")
-    // 粘贴框
-    assert.match(html, /<textarea/, "页面必须有粘贴框")
-    assert.match(html, /name="callback"/)
+    // 0.7.12：本机引导页不放粘贴框，把用户导回 magpie 的 Code 输入框
+    assert.doesNotMatch(html, /<textarea/, "0.7.12 起本机引导页不放粘贴框")
+    assert.match(html, /Code<\/strong>/, "要引导用户回 magpie 的 Code 输入框")
     // QQ 的 mqqapi:// 自带 URL，不需要「先复制再粘贴」，别把微信那套脚本塞进 QQ 页
     assert.doesNotMatch(html, /copyAndGo/, "QQ 页不该出现微信的复制跳转脚本")
   } finally {
@@ -612,7 +609,8 @@ test("本地登录页：微信页给「复制授权链接（到电脑打开）�
     assert.doesNotMatch(html, /mqqapi:\/\//, "微信页不该用 QQ 的 scheme")
     assert.doesNotMatch(html, /识别图中二维码/, "微信页不再教长按识别二维码")
     assert.doesNotMatch(html, /点下面的按钮完成微信授权/, "点一下不会完成授权，别写这种误导句")
-    assert.match(html, /<textarea/, "同样要有粘贴框")
+    assert.doesNotMatch(html, /<textarea/, "0.7.12 起本机引导页不接收粘贴")
+    assert.match(html, /不接收/, "必须明说这个页面不收粘贴")
   } finally {
     s.close()
   }

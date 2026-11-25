@@ -126,13 +126,15 @@ test("微信页：实验链接单独一栏、标注对 Marvis appid 无效、灰
   assert.match(webBlock, /background:#f0f1f3/, "实验链接框要弱化成灰底")
 })
 
-test("微信页：复制/粘贴兜底全套仍在", () => {
+test("微信页：复制兜底仍在，但不再放粘贴框（0.7.12）", () => {
   assert.match(wxHtml, /function copyWxUrl\(/)
   assert.match(wxHtml, /id="wx-copy-btn"/)
   assert.match(wxHtml, /getElementById\('wx-copy-btn'\)/, "「已复制 ✓」回写按 id 定位")
   assert.match(wxHtml, /一台手机扫不了自己的码/)
-  assert.match(wxHtml, /<textarea/, "粘贴框仍在")
-  assert.match(wxHtml, /name="callback"/)
+  // 0.7.12：本机引导页只给链接和步骤；粘贴统一回 magpie 的 Code 输入框
+  assert.doesNotMatch(wxHtml, /<textarea/, "本机引导页不再放粘贴框")
+  assert.doesNotMatch(wxHtml, /name="callback"/)
+  assert.match(wxHtml, /不接收/, "必须明说这一侧不收粘贴")
 })
 
 test("微信页：带 error 重渲染时主按钮与步骤块仍在（可重试）", () => {

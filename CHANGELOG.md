@@ -1,5 +1,18 @@
 # 更新记录
 
+## 0.7.12 — 2026-11-25
+
+- **撤掉本机引导页里的粘贴框**（真机反馈：在那儿提交显示「登录成功」，插件里却没有账号）：
+  根因是壳只有在 `callback()` 被调用、且**没有**给粘贴内容时才去 await `paste.wait`；
+  用户在本机页提交时壳根本没被通知，结果没人取 → 不写 `plugin-auth.json`；
+  更糟的是那一次 `code` 已被页面这一侧换成登录态，再粘回壳的 Code 框反而报错。
+  现在：`formPage()` 不再渲染 `<textarea>`/`name="callback"`/「完成登录」按钮（也不再暴露一次性 token），
+  改成「第 2 步：把 `yybadaccess…code=…` 整条复制，**回到 magpie 的登录界面**，粘到那里的 **Code** 输入框」，
+  并明确写「这个页面不接收粘贴」。`POST /submit` 一律回 **410**（页面已停用），不做换取、不消耗 code。
+  `mobileOauthLogin().callback()` 的「等本地页」分支直接抛可操作错误（不再白等 10 分钟），
+  `startPasteServer` 的 `wait` 只剩超时/取消信号（`settle` 死代码删除）。
+- 测试：`startPasteServer` 的 GET 断言改成「没有 textarea / 没有完成登录 / 不暴露 token / 要指向 Code 框」；
+  `POST /submit` 断言 410 且不写盘；新增 `exchangeFromPaste` 空内容/无 code/无 state 的可读错误断言。
 ## 0.7.11 — 2026-11-25
 
 - **把 0.7.10 没扫干净的旧文案全部对齐**（行为不变，只改文字与注释）：

@@ -257,8 +257,9 @@ export function mobileInstructions(loginType) {
  *      **微信走「复制授权链接」**（0.7.10 主路径）：链接拿到**电脑**浏览器打开才出二维码，
  *      再用这台手机的微信「扫一扫」扫屏幕；「分享到微信（可选）」只是把链接送去电脑的手段之一。
  *      微信没有带 URL 的 scheme，weixin:// 只能唤起微信本体、对扫码没帮助，已撤出主按钮；
- *   ② 粘贴框 + 「完成登录」按钮 —— 授权完成后浏览器停在一条 yybadaccess 地址上，
- *      用户把它整条贴回来。
+ *   ② **不要**再放粘贴框（0.7.12 删掉）：在这个页面里换登录态，壳收不到结果，
+ *      账号不会出现在 magpie 里；而且一次性 code 会被这一侧先消费，粘回壳反而失败。
+ *      用户拿到的那条 yybadaccess 地址要粘到**壳的 Code 输入框**（method:"code" → 插件 callback）。
  * 上一版只有 (2) 但没让用户知道要来这里开页面；再上一版只有 instructions 文字，
  * 用户连粘贴框都看不到（宿主的 method:"auto" 形态不渲染输入框）。
  * 现在两者都在同一个页面上，且 (1) 是首要动作。
@@ -390,14 +391,11 @@ ${fallback}
 ${wxNextSteps}
 <hr>
 
-<p class="lead">第 2 步：授权完成后浏览器会停在一条 <code>yybadaccess.3g.qq.com/…marvis_oauth?…code=…</code> 的地址上，
-把它整条复制，粘贴到下面完成登录。</p>
-<form method="post" action="/submit">
-  <input type="hidden" name="t" value="${esc(token)}">
-  <textarea name="callback" inputmode="text" autocomplete="off" autocapitalize="off"
-    spellcheck="false" placeholder="把 yybadaccess.3g.qq.com/…marvis_oauth?login_type=…&code=…&state=… 整条粘贴到这里"></textarea>
-  <button type="submit">完成登录</button>
-</form>
+<p class="lead">第 2 步：授权完成后浏览器会停在一条 <code>yybadaccess.3g.qq.com/…marvis_oauth?…code=…</code> 的地址上。
+把它整条复制，<strong>回到 magpie 的登录界面</strong>，粘贴到那里的 <strong>Code</strong> 输入框提交。</p>
+<p class="muted">⚠ 这个页面<strong>不接收</strong>粘贴。它只负责给你授权链接和步骤，真正写入登录态的是 magpie 那边
+（method:"code" 的输入框 → 插件的 callback）。在这个页面里提交的话，壳收不到结果、账号不会出现在 magpie 里；
+更糟的是一次性 code 会被这一侧先消费掉，再粘回壳反而报错。</p>
 ${copyScript}
 <p class="muted">这个页面只在本机 127.0.0.1 上，内容不会发到别处。</p>`,
   )
@@ -424,7 +422,7 @@ function readBody(req) {
 }
 
 /**
- * 起本地粘贴表单服务，等用户把回调地址贴回来。
+ * 起本机引导页服务（0.7.12 起只给链接和步骤，不收粘贴），并暴露一个「取消/超时」信号。
  *
  * @param {{
  *   loginType?: "QC" | "WX",
@@ -434,7 +432,7 @@ function readBody(req) {
  *   signal?: AbortSignal,
  *   onReady?: (url: string) => void,
  * }} opts
- * @returns {Promise<{ url: string, wait: Promise<any>, close: () => void }>}
+ * @returns {Promise<{ url: string, wait: Promise<any>, close: () => void }>} `wait` 只在超时/abort 时 reject；登录结果由壳的 `callback(pasted)` 换取。
  */
 export async function startPasteServer({
   loginType = "QC",
@@ -451,13 +449,11 @@ export async function startPasteServer({
   // 一次性 token：防止局域网/本机其他程序往这个端口乱 POST（CSRF）
   const token = randomBytes(16).toString("hex")
 
-  /** @type {(v: any) => void} */
-  let settle = () => {}
   /** @type {(e: any) => void} */
   let fail = () => {}
   let settled = false
-  const result = new Promise((resolve, reject) => {
-    settle = resolve
+  // 0.7.12：页面不再提交结果 → 这个 Promise 只用于「超时 / 取消」信号，永不 resolve
+  const result = new Promise((_resolve, reject) => {
     fail = reject
   })
 
@@ -480,54 +476,21 @@ export async function startPasteServer({
 
     if (req.method !== "POST") return send(405, page("405", "<h1>不支持的方法</h1>"))
 
-    let body = ""
-    try {
-      body = await readBody(req)
-    } catch (err) {
-      return send(413, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: String(err?.message ?? err) }))
-    }
-
-    // 表单是 application/x-www-form-urlencoded
-    const form = new URLSearchParams(body)
-    if (form.get("t") !== token) {
-      return send(403, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: "这个页面已经失效，请回 magpie 重新点一次登录。" }))
-    }
-    const pasted = String(form.get("callback") ?? "").trim()
-    if (!pasted) return send(400, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: "没有收到内容，请把地址栏那条地址粘贴进来。" }))
-    if (!extractCode(pasted)) {
-      return send(
-        400,
-        formPage({
-          loginType,
-          token,
-          error: "粘贴的内容里没有 code。请确认复制的是授权完成后地址栏那条 yybadaccess.3g.qq.com/…marvis_oauth?…code=… 的地址。",
-        }),
-      )
-    }
-
-    const state = stateOf(pasted)
-    if (!state) {
-      return send(400, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: "粘贴的内容里没有 state，请重新复制地址栏那条完整地址。" }))
-    }
-
-    try {
-      // ⚠ guid 必须与 authorizeUrl() 那一次同一个（token 绑定到它）
-      const acct = await parseCallback(pasted, "", { loginType, guid, state })
-      if (settled) return send(409, page("已处理", "<h1>这次登录已经完成</h1><p class='muted'>可以回到 magpie 了。</p>"))
-      settled = true
-      send(
-        200,
-        page(
-          "登录成功",
-          `<h1 class="ok">✓ 登录成功</h1><p>可以关掉这个页面，回到 magpie 了。</p><p class="muted">窗口会自动关闭。</p>`,
-        ),
-      )
-      settle(acct)
-    } catch (err) {
-      // 换取失败（网络抖动 / code 已被消费）：允许用户在同一页面重试一次
-      const msg = String(err?.message ?? err)
-      send(502, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: msg.slice(0, 300) }))
-    }
+    // ⚠ 0.7.12：本机引导页**不再接收粘贴**（页面里的框已删掉）——
+    //   在页面这一侧换登录态，壳（magpie）根本收不到结果，账号不会出现在插件里；
+    //   而且一次性 code 会被这一侧先消费，用户再粘回壳的 Code 框时报错。
+    //   正确通道只有一个：壳的 method:"code" 输入框 → 插件的 callback(pasted)。
+    return send(
+      410,
+      page(
+        "页面已停用",
+        `<h1>这个页面不接收粘贴</h1>
+<p>请回到 <strong>magpie 的登录界面</strong>，把 <code>yybadaccess.3g.qq.com/…marvis_oauth?…code=…</code> 那条地址
+粘贴到那里的 <strong>Code</strong> 输入框提交。</p>
+<p class="muted">本页面只负责给你授权链接和步骤：在这里换登录态，壳收不到结果，
+一次性 code 还会被这一侧先用掉，粘回壳时反而失败。</p>`,
+      ),
+    )
   })
 
   // 端口被占用就退到随机端口（手机上有别的服务占 4618 很常见）
@@ -548,7 +511,7 @@ export async function startPasteServer({
   const actualPort = server.address()?.port
   // ⚠ 监听句柄不参与「保活」：登录页只是等待用户的一次性入口，不该让宿主/CLI 进程
   //    因为一个没人点的登录页而无法退出（测试里表现为整套要拖到 10 分钟超时）。
-  //    超时定时器同样已 unref（见下）。真正等结果的调用方自己 await paste.wait 即可。
+  //    超时定时器同样已 unref（见下）。0.7.12 起 wait 只承载超时/取消，登录结果走壳的 callback。
   server.unref?.()
   const pageUrl = `http://127.0.0.1:${actualPort}/`
 
@@ -674,15 +637,16 @@ export function mobileOauthLogin({
               `点「打开浏览器」打开的是**本机引导页**：上面有「复制授权链接（粘贴到电脑浏览器打开）」和「分享到微信（可选）」。`,
               `关键一步：这条链接要拿到**电脑**（或第二台设备）的浏览器里打开，屏幕上会出现二维码；`,
               `用这台手机的微信「扫一扫」扫电脑屏幕 → 手机上点「确认登录」→ 电脑跳到 yybadaccess.3g.qq.com/…code=… ，`,
-              `把那条地址整条复制，粘贴到下面的输入框提交（引导页上也有粘贴框，二选一即可）。`,
-              `本机引导页地址：${paste.url}`,
+              `把那条地址整条复制，**粘贴到下面这个输入框**提交 —— 不要在本机引导页里提交`,
+              `（引导页只负责给链接；在它里面换登录态壳收不到，账号也不会出现在 magpie 里）。`,
+              `本机引导页地址（手机浏览器可打开，含「复制授权链接」「分享到微信」按钮）：${paste.url}`,
             ].join("\n")
           : [
               base,
               "",
               `完成授权后，把浏览器停在的那条 yybadaccess.3g.qq.com/…marvis_oauth?…code=… 地址整条复制，`,
               `粘贴到下面的输入框提交。`,
-              `（如果下面没有输入框，用手机浏览器打开这个本机登录页，那上面有按钮和粘贴框）：${paste.url}`,
+              `（本机引导页只给按钮和步骤、不接收粘贴；若下面没有输入框，改用 CLI 导入登录态或换更完整的壳）：${paste.url}`,
             ].join("\n")
 
       return {
@@ -702,26 +666,21 @@ export function mobileOauthLogin({
           const pasted = pastedInputOf(a, b)
           if (pasted) {
             const acct = await exchangeFromPaste(pasted, { loginType, guid })
-            return toAuth ? toAuth(acct) : acct
-          }
-          // ② 宿主没给内容 → 等本地页提交（用户走了兜底路径）
-          if (signal) {
-            if (signal.aborted) paste.close()
-            else signal.addEventListener("abort", () => paste.close(), { once: true })
-          }
-          try {
-            const acct = await paste.wait
-            // guid 必须与授权那次同一个（token 绑定到它）
+            // guid 必须与授权那次同一个（token 绑定到它）；loginType 缺省时按通道补
             const filled = { ...acct, guid, loginType: acct.loginType ?? (loginType === "WX" ? "2" : "1") }
             return toAuth ? toAuth(filled) : filled
-          } catch (err) {
-            // 失败时把本地页地址带进错误：用户能就地重试，不用重新走一遍授权
-            const e = new Error(`${String(err?.message ?? err)}\n\n重试入口（10 分钟内有效）：${paste.url}`)
-            e.pageUrl = paste.url
-            throw e
-          } finally {
-            paste.close()
           }
+          // ② 宿主没给内容 → 0.7.12 起不再回落到本机页（那一侧换登录态壳收不到，
+          //    还会先把一次性 code 用掉）。直接给出可操作的错误，别让用户白等 10 分钟。
+          paste.close()
+          throw new Error(
+            [
+              "没有收到回调地址：这条登录路要靠 magpie 的 Code 输入框把地址交回来。",
+              "请重新点一次登录 → 打开浏览器（本机引导页）→ 复制授权链接到电脑打开出二维码 →",
+              "手机微信「扫一扫」→ 电脑跳到 yybadaccess…code=… → 把那条地址整条粘贴到 magpie 的 Code 输入框提交。",
+              `本机引导页只提供链接和步骤，不接收粘贴：${paste.url}`,
+            ].join("\n"),
+          )
         },
         /**
          * 用户放弃这次授权（退出登录界面 / 换一种登录方式）时释放本地端口。
