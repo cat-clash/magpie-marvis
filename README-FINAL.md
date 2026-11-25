@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.8.1 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.8.2 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -102,6 +102,20 @@ node scripts/cli.mjs breaker reset --all  # 全部解除
   想纯隔离：`MARVIS_RISK_CONSENSUS=0`。
 - 判读技巧：只有**一个**账号 429 / `4100404` = 账号级节奏风控，换号可用、等这个号冷却即可；
   **多个**账号接连出现 = 通道级封锁，换号也没用，该换 IP / 重签 uskey / 改走 `MARVIS_WS_MODE=remote`。
+
+#### 配了 relay 却仍报 429？先查环境变量覆盖（0.8.2）
+
+`openclaw.json` 写了 `mode=relay`，插件却仍走 HTTP 直连撞 `4100404` → 本地熔断 429 / 令牌用满 ——
+根因是**父进程继承了 `MARVIS_WS_MODE=off`，环境变量优先级高于文件配置**（`src/marvis/openclaw.mjs`
+的 `cfg()`：`env("MARVIS_WS_MODE", f.mode)`）。这类冲突以前完全看不见，用户会以为是官方真限流、换号等冷却都没用。
+
+0.8.2 起：
+- 429 文案会直接点出这条冲突并给出修法；
+- `node scripts/probe-openclaw.mjs` 与 `openclawStatus()` 新增 `fileMode` / `envMode` / `overrideWarning`
+  三个诊断字段（不含密钥）。
+- **彻底修法**：在 magpie 启动脚本（如 `start-magpie.ps1`）清理代理变量后加一行
+  `[Environment]::SetEnvironmentVariable('MARVIS_WS_MODE', $null, 'Process')`，每次启动都清掉继承值，
+  让 `openclaw.json` 的 relay 生效。改完重启，用 `node scripts/probe-openclaw.mjs` 确认 `mode=relay`。
 
 ## 三、PC 端安装（magpie / OpenCode）
 
@@ -222,7 +236,7 @@ node scripts/cli.mjs accounts list --json --config ~/.config/magpie   # 脚本�
 ### 最快路径：下载 phone-kit 附件，一条命令（gateway 通道）
 
 Release 附件 `magpie-marvis-phone-kit.zip` 已把**插件 + Python 网关 + 一键脚本**打在一起
-（Release 页：https://github.com/cat-clash/magpie-marvis/releases/tag/v0.8.1）。
+（Release 页：https://github.com/cat-clash/magpie-marvis/releases/tag/v0.8.2）。
 不用分别 clone 两个仓库。
 
 ```sh
@@ -235,7 +249,7 @@ sh phone-setup.sh                        # 起网关 + 写 gateway.json + 打印
 > ① 手机浏览器先登录 `github.com/cat-clash`（登录态保留后点 Release 页的附件即可下载）；
 > ② 更省事 —— 在电脑上用已登录的 gh CLI 下载，再把文件送到手机：
 > ```sh
-> gh release download v0.8.1 -R cat-clash/magpie-marvis -p '*.zip'
+> gh release download v0.8.2 -R cat-clash/magpie-marvis -p '*.zip'
 > # 得到 magpie-marvis-phone-kit.zip，微信文件传输助手 / 数据线拷到手机
 > ```
 > 请用 `sh phone-setup.sh` 调用：zip 解压后脚本可能没有可执行位，直接 `./phone-setup.sh` 会报

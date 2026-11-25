@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.8.1）
+# 腾讯 Marvis · magpie 供应商插件（0.8.2）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.8.1）
+## 传输通道（0.8.2）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -37,7 +37,14 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 – 0.8.1 新增（手机上最常用的几条）
+## 0.7.4 – 0.8.2 新增（手机上最常用的几条）
+
+- **429 配置自检：揪出「环境变量覆盖了配置文件」**（0.8.2）：明明 `openclaw.json` 写了 `mode=relay`，
+  却仍然返回「429 限流 / 令牌用满」—— 根因是父进程继承了 `MARVIS_WS_MODE=off`，环境变量优先级高于
+  文件配置，把插件劫持到被 `4100404` 拦的 HTTP 直连。现在 429 文案会直接点出这条冲突并给出修法；
+  `node scripts/probe-openclaw.mjs` / `openclawStatus()` 新增 `fileMode` / `envMode` / `overrideWarning`
+  三个诊断字段。magpie 启动脚本里加一行
+  `[Environment]::SetEnvironmentVariable('MARVIS_WS_MODE', $null, 'Process')` 即可彻底清掉继承值。
 
 - **多账号互不牵连：熔断 / 节奏闸按账号分桶**（0.8.0，默认开启，PC 与手机同效）：以前一个账号被
   `4100404` 拦住会让**所有**账号一起停（进程级单例熔断 + 单条 pacing 时间轴）。现在每个账号各有一条

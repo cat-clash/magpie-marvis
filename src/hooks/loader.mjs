@@ -16,6 +16,7 @@ import { getBreaker, accountKeyOf, accountLabelOf, riskScope } from "../breaker.
 import { pacingWait } from "../pacing.mjs"
 import {
   openclawEnabled,
+  openclawStatus,
   openclawChat,
   openclawChatStream,
   openclawResponse,
@@ -816,7 +817,12 @@ export function loaderHook(input, options = {}) {
               "MARVIS_WS_MODE=remote 改走 WS 通道）。" +
               "MARVIS_RISK_COOLDOWN_MS=0 可禁用熔断；MARVIS_RISK_SCOPE=global 可退回全局冷却；" +
               "node scripts/cli.mjs breaker reset <账号> 可立刻解封。"
-          return riskResponse("risk_cooldown", message, gate.retryAfterMs / 1000)
+          // 0.8.2：若父进程继承了 MARVIS_WS_MODE=off 覆盖了 openclaw.json 的 relay，
+          // 用户看到的 429 其实是「配置被劫持到 HTTP 直连」——把这条隐藏链路点出来，
+          // 否则换账号 / 等冷却都没用（真实踩坑：用户配了 relay 却仍被 429，排查很久）。
+          const cfgWarn = openclawStatus().overrideWarning
+          const fullMessage = cfgWarn ? `${message} ${cfgWarn}` : message
+          return riskResponse("risk_cooldown", fullMessage, gate.retryAfterMs / 1000)
         }
 
         let response

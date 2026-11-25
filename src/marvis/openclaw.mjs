@@ -183,6 +183,29 @@ export function localGatewayToken() {
   return found
 }
 
+/**
+ * 检测「环境变量覆盖文件配置」的冲突（0.8.2）。
+ *
+ * 真实踩坑：openclaw.json 写了 mode=relay，但父进程继承了 MARVIS_WS_MODE=off，
+ * env 优先级更高 → 插件走被 4100404 拦的 HTTP 直连 → 本地熔断 429 / 令牌用满。
+ * 纯函数、不读文件系统，方便离线单测；调用方负责把两侧值传进来。
+ *
+ * @returns {string} 有冲突时是可行动提示，无冲突返回空串
+ */
+export function wsModeOverride(envMode, fileMode, effectiveMode) {
+  const e = String(envMode ?? "").trim().toLowerCase()
+  const f = String(fileMode ?? "").trim().toLowerCase()
+  if (!e || !f || e === f) return ""
+  if (e === "off" && (f === "relay" || f === "remote")) {
+    return (
+      `环境变量 MARVIS_WS_MODE=off 覆盖了 openclaw.json 的 mode=${f}：` +
+      "插件会走被 4100404 拦的 HTTP 直连，表现为 429 限流 / 令牌用满。" +
+      `清掉该环境变量（或改设为 ${f}）即可恢复 ${f}。`
+    )
+  }
+  return `环境变量 MARVIS_WS_MODE=${e} 覆盖了 openclaw.json 的 mode=${f}（实际生效：${effectiveMode || e}）。`
+}
+
 /** 诊断状态：给拉取配置 / 自检脚本用，不含任何密钥 */
 export function openclawStatus() {
   const c = cfg()
@@ -202,8 +225,12 @@ export function openclawStatus() {
   if (c.frames && existsSync(c.frames)) {
     framesOk = /"method"\s*:\s*"connect"/.test(readFileSync(c.frames, "utf8"))
   }
+  const f = fileConfig()
   return {
     mode: c.mode,
+    fileMode: String(f.mode ?? ""),
+    envMode: String(process.env.MARVIS_WS_MODE ?? ""),
+    overrideWarning: wsModeOverride(process.env.MARVIS_WS_MODE, f.mode, c.mode),
     url: host && c.mode === "remote" && !process.env.MARVIS_WS_URL ? `wss://${host}/` : c.url,
     gatewayToken: c.mode === "relay" ? (localGatewayToken() ? "found" : "missing (open Marvis PC client)") : "n/a",
     handshake: c.handshake ? (existsSync(c.handshake) ? (handshakeOk ? "ok" : "missing credentials") : "missing file") : "not configured",

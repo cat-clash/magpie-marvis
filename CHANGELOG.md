@@ -1,5 +1,24 @@
 # 更新记录
 
+## 0.8.2 — 2026-11-25
+
+- **429 配置自检：揪出「环境变量覆盖配置文件」这个隐藏根因**（真实踩坑）：`openclaw.json` 写了
+  `mode=relay`，用户却一直看到「429 限流 / 令牌用满 10,000,000」，以为是官方真限流 —— 实际上是
+  父进程继承了 `MARVIS_WS_MODE=off`，而 `src/marvis/openclaw.mjs` 的 `cfg()` 里环境变量优先于文件
+  （`env("MARVIS_WS_MODE", f.mode)`），插件被劫持到被 `4100404` 拦的 HTTP 直连，再触发本地熔断 429。
+  以前这条链路完全不可见，换账号 / 等冷却都没用。
+  - `openclawStatus()` / `probe-openclaw.mjs` 新增三个诊断字段：`fileMode` / `envMode` / `overrideWarning`
+    （不含密钥），并抽出纯函数 `wsModeOverride(envMode, fileMode, effectiveMode)`；env=off 覆盖 file=relay/remote
+    时给出可行动提示（含 magpie 启动脚本里清继承值的写法）。
+  - `src/hooks/loader.mjs` 的风控冷却 429 文案拼接 `overrideWarning` —— 用户看到 429 的当下就知道
+    是配置被覆盖，而不是去换号 / 干等。
+  - **彻底修法**：在启动脚本（如 `D:\magpie\start-magpie.ps1`）清理代理变量后加一行
+    `[Environment]::SetEnvironmentVariable('MARVIS_WS_MODE', $null, 'Process')`，每次启动都清掉继承值。
+    实测改完重启后 `mode=relay`、pinned 账号真实请求 STATUS 200、breaker 全清不再累积 429。
+  - 测试：`tests/openclaw.test.mjs` 新增 4 例（off 覆盖 relay/remote 提示、一致/未设置不告警、其它组合通用提示）
+    与状态字段形状断言。
+- 版本同步：package.json / registry-entry.json / README.md / README-FINAL.md 全部 0.8.2。
+
 ## 0.8.1 — 2026-11-25
 
 - **修两个 0.8.0 首版回归**（0.8.0 刚发出就被自查发现，务必升级）：

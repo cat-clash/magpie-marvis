@@ -6,6 +6,10 @@ const s = openclawStatus()
 console.log("=== magpie-marvis-final · openclaw 状态 ===")
 console.log(JSON.stringify(s, null, 2))
 console.log()
+if (s.overrideWarning) {
+  console.log("⚠ 配置冲突：" + s.overrideWarning)
+  console.log()
+}
 if (s.mode === "off") {
   console.log("WS 传输已关闭（MARVIS_WS_MODE=off），走原版 HTTP 网关（当前被 4100404 风控）。")
 } else if (s.mode === "relay") {

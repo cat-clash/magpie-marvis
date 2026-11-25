@@ -12,6 +12,7 @@ import {
   openclawResponse,
   openclawEnabled,
   openclawStatus,
+  wsModeOverride,
 } from "../src/marvis/openclaw.mjs"
 
 // 宿主机可能带着 MARVIS_* 真实配置跑 magpie —— 测试必须与宿主环境隔离
@@ -53,6 +54,37 @@ test("openclawEnabled / openclawStatus 形状正确", () => {
   assert.equal(typeof s.url, "string")
   assert.ok(s.sessionKey)
   assert.equal(typeof openclawEnabled(), "boolean")
+  // 0.8.2：配置来源诊断字段
+  assert.equal(typeof s.fileMode, "string")
+  assert.equal(typeof s.envMode, "string")
+  assert.equal(typeof s.overrideWarning, "string")
+})
+
+test("wsModeOverride：env=off 覆盖 file=relay 给出可行动提示", () => {
+  const w = wsModeOverride("off", "relay", "off")
+  assert.match(w, /MARVIS_WS_MODE=off/)
+  assert.match(w, /openclaw\.json/)
+  assert.match(w, /relay/)
+  assert.match(w, /4100404|429/)
+  assert.match(w, /清掉|SetEnvironmentVariable/)
+})
+
+test("wsModeOverride：env=off 覆盖 file=remote 也提示", () => {
+  const w = wsModeOverride("OFF", "remote", "off")
+  assert.match(w, /remote/)
+})
+
+test("wsModeOverride：一致或未设置时不告警", () => {
+  assert.equal(wsModeOverride("relay", "relay", "relay"), "")
+  assert.equal(wsModeOverride("", "relay", "relay"), "")
+  assert.equal(wsModeOverride("off", "", "off"), "")
+  assert.equal(wsModeOverride(undefined, "relay", "relay"), "")
+})
+
+test("wsModeOverride：其它不一致组合给出通用提示", () => {
+  const w = wsModeOverride("remote", "relay", "remote")
+  assert.match(w, /覆盖/)
+  assert.match(w, /实际生效/)
 })
 
 test("openclawResponse 非流式：OpenAI 兼容结构", async () => {
