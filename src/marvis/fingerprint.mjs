@@ -18,6 +18,7 @@ import { directFetch } from "./directnet.mjs"
 import { createRequire } from "node:module"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 
 const require = createRequire(import.meta.url)
@@ -31,8 +32,118 @@ const REQUIRED = ["beacon_napi.node", "qimei.dll", "beacon_sdk.dll", "beacon_wra
 
 /** 上游 appKey —— 来自 Marvis 的 resources/.env 的 MARVIS_QIMEI_APPKEY */
 const APP_KEY = process.env.MARVIS_QIMEI_APPKEY || "0WIN06Y06DKV1IUQ"
-/** Beacon SDK 初始化版本；Marvis 1.60.3400.x 实测可用 */
-const APP_VERSION = process.env.MARVIS_APP_VERSION || "1.60.3400.35"
+/**
+ * Beacon SDK 初始化版本。
+ *
+ * 旧版写死 `1.60.3400.35`，但本机客户端实际版本持续在变（已见 1.60.3500.x /
+ * 1.60.3600.x）。`init(appKey, appVersion)` 的版本号会进入 SDK 的风纹参数；
+ * 与实际客户端不一致会放大“插件指纹 vs 官方客户端”的差异。
+ *
+ * 取值顺序：
+ *   1. MARVIS_APP_VERSION（显式覆盖，最高优先级，行为与旧版完全一致）；
+ *   2. 客户端日志里的 `client_platform_version`（本机实测 1.60.3600.59）；
+ *   3. 客户端安装目录 `Application\<version>\win32-native` 的目录名；
+ *   4. 兜底 DEFAULT_APP_VERSION（旧值）。
+ *
+ * 探测结果进程级缓存一次（日志扫描有 IO 成本）；环境变量每次读取，改了立即生效。
+ */
+const DEFAULT_APP_VERSION = "1.60.3400.35"
+const CLIENT_VERSION_RX = /client_platform_version\\?["']?\s*[:=]\s*\\?["']?(\d+\.\d+\.\d+\.\d+)/g
+const CLIENT_DIR_VERSION_RX = /^(\d+\.\d+\.\d+\.\d+)$/
+let detectedAppVersion = ""
+let appVersionScanned = false
+
+function compareVersionDesc(a, b) {
+  const pa = String(a).split(".").map(Number)
+  const pb = String(b).split(".").map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] ?? 0) - (pa[i] ?? 0)
+    if (d) return d
+  }
+  return 0
+}
+
+/** 从客户端日志与安装目录探测运行中的 Marvis 版本；找不到返回空串 */
+function detectAppVersion() {
+  if (appVersionScanned) return detectedAppVersion
+  appVersionScanned = true
+  const found = new Set()
+
+  // 1) 客户端日志：客户端自己上报的 client_platform_version 最可靠。
+  //    优先取 mtime 最新的几个 Marvis*.log，避免读一整个历史目录。
+  const logDirs = [
+    process.env.MARVIS_LOG_DIR,
+    join(homedir(), "AppData", "Local", "Temp", "Tencent", "Marvis", "logs"),
+    join(homedir(), ".config", "Tencent", "Marvis", "logs"),
+    "/tmp/Tencent/Marvis/logs",
+  ].filter(Boolean)
+  let stop = false
+  for (const dir of logDirs) {
+    if (stop || !existsSync(dir)) continue
+    let files = []
+    try {
+      files = readdirSync(dir)
+        .filter((f) => /^Marvis.*\.log$/i.test(f))
+        .map((f) => ({ f, p: join(dir, f) }))
+        .filter((x) => {
+          try {
+            return statSync(x.p).size < 64 * 1024 * 1024
+          } catch {
+            return false
+          }
+        })
+        .sort((a, b) => {
+          try {
+            return statSync(b.p).mtimeMs - statSync(a.p).mtimeMs
+          } catch {
+            return 0
+          }
+        })
+        .slice(0, 5)
+    } catch {
+      continue
+    }
+    for (const { p } of files) {
+      try {
+        const text = readFileSync(p, "utf8")
+        for (const m of text.matchAll(CLIENT_VERSION_RX)) found.add(m[1])
+        if (found.size) {
+          stop = true
+          break
+        }
+      } catch {
+        /* 日志被占用 / 读不了就跳过 */
+      }
+    }
+  }
+
+  // 2) 安装目录名兜底：Program Files\Tencent\Marvis\Application\<version>\
+  if (!found.size) {
+    for (const envName of ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]) {
+      const base = process.env[envName]
+      if (!base) continue
+      let names = []
+      try {
+        names = readdirSync(join(base, "Tencent", "Marvis", "Application"))
+      } catch {
+        continue
+      }
+      for (const name of names) {
+        if (CLIENT_DIR_VERSION_RX.test(name)) found.add(name)
+      }
+      if (found.size) break
+    }
+  }
+
+  detectedAppVersion = [...found].sort(compareVersionDesc)[0] || ""
+  return detectedAppVersion
+}
+
+/** 当前生效的 Beacon 初始化版本（每次读 env，探测结果缓存） */
+export function appVersion() {
+  const env = String(process.env.MARVIS_APP_VERSION ?? "").trim()
+  return env || detectAppVersion() || DEFAULT_APP_VERSION
+}
 
 /** native SDK 的业务 id（不是 /v3 的 marvis_client） */
 export const USKEY_BUS_ID = process.env.MARVIS_USKEY_BUSID || "marvis"
@@ -106,7 +217,7 @@ function loadBeacon(common = {}) {
     const mod = require(join(NATIVE_DIR, "beacon_napi.node"))
     // 有的版本 init 返回 0，有的返回 undefined；调用失败也继续试着出票。
     try {
-      mod.init(APP_KEY, APP_VERSION)
+      mod.init(APP_KEY, appVersion())
     } catch (err) {
       beaconError = `init: ${err?.message ?? err}`
     }
@@ -345,7 +456,7 @@ async function androidBunUskey(busInfo) {
         },
       })
       androidCtx = androidLib.symbols.UKInstanceGetDefault()
-      androidLib.symbols.UKInstanceInit(androidCtx, APP_KEY, APP_VERSION)
+      androidLib.symbols.UKInstanceInit(androidCtx, APP_KEY, appVersion())
     }
     const ticket = androidLib.symbols.UKInstanceGetUSkey(androidCtx, "marvis", busInfo, "")
     return String(ticket || "").trim()
@@ -438,6 +549,12 @@ export function fingerprintStatus() {
   return {
     native,
     nativeDir: NATIVE_DIR,
+    appVersion: appVersion(),
+    appVersionSource: String(process.env.MARVIS_APP_VERSION ?? "").trim()
+      ? "env"
+      : detectedAppVersion
+        ? "detected"
+        : "default",
     qimei36: qimei ? `${qimei.slice(0, 6)}…` : "",
     qimei36Length: qimei.length,
     // backend 只报告"实际会走的出票通道"："random" 仅在显式 opt-in 时出现；

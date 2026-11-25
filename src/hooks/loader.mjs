@@ -646,6 +646,21 @@ export function loaderHook(input, options = {}) {
         }
 
         /**
+         * 403 自愈链的每次重试也走节奏闸。
+         *
+         * 旧版三个重试函数直接调 callUpstream，绕过主路径的那一次 pacingWait ——
+         * 一次请求最多连发 6 发（兜底句 + 4 句候选 + 护栏），节奏闸形同虚设，
+         * 正好在「被内容过滤盯上」的高压时刻把请求打成尖峰。
+         * 这里统一补上节流；MARVIS_RETRY_PACING=0 可显式关掉（仅调试用）。
+         */
+        const pacedRetryUpstream = async (payload) => {
+          if (String(process.env.MARVIS_RETRY_PACING ?? "").trim() !== "0" && !openclawEnabled()) {
+            await pacingWait(acctBucket)
+          }
+          return callUpstream(payload)
+        }
+
+        /**
          * 403 兜底：把首行换成兜底句，**重试一次**。
          * 成功返回规范化后的响应；失败返回 null（落回统一诊断，不把第二次的错误文本当结果）。
          */
@@ -653,7 +668,7 @@ export function loaderHook(input, options = {}) {
           const next = withFirstLineInBody(json, firstLine.text)
           if (next === json) return null // 三处都找不到 system 文本，无从下手
           try {
-            const retry = await callUpstream(JSON.stringify(next))
+            const retry = await pacedRetryUpstream(JSON.stringify(next))
             return retry.ok ? normalizeStreaming(retry) : null
           } catch {
             return null
@@ -698,7 +713,7 @@ export function loaderHook(input, options = {}) {
             if (next === json) continue
             let retry
             try {
-              retry = await callUpstream(JSON.stringify(next))
+              retry = await pacedRetryUpstream(JSON.stringify(next))
             } catch {
               return null
             }
@@ -718,7 +733,7 @@ export function loaderHook(input, options = {}) {
           const next = withWordJoiner(json)
           if (next === json) return null // 护栏没开，或改写没有命中任何内容
           try {
-            const retry = await callUpstream(JSON.stringify(next))
+            const retry = await pacedRetryUpstream(JSON.stringify(next))
             return retry.ok ? normalizeStreaming(retry) : null
           } catch {
             return null
@@ -973,12 +988,15 @@ export function loaderHook(input, options = {}) {
           if (autoEnabled) {
             probeReachable = await probeLocalRelay()
             if (probeReachable) {
-              const savedMode = process.env.MARVIS_WS_MODE
+              // ⚠ 不碰 process.env.MARVIS_WS_MODE —— 那是全局状态。旧版在 await 之前设成
+              //   "relay"、finally 里恢复，并发请求会在窗口期看到被劫持的模式（A 号回退
+              //   把 B 号也拖进 WS）。改为把 mode 作为**单次请求参数**透传给 openclaw 调用链
+              //   （cfg(modeOverride) → openclawChatStream / openclawChat），天然并发安全。
+              const relayOpts = { signal: init?.signal, mode: "relay" }
               try {
                 autoTried = true
-                process.env.MARVIS_WS_MODE = "relay"
                 if (requestJson?.stream) {
-                  const iterator = openclawChatStream(creds, requestJson, { signal: init?.signal })
+                  const iterator = openclawChatStream(creds, requestJson, relayOpts)
                   const first = await iterator.next()
                   if (!first.done) {
                     return openclawStreamResponse(requestJson, {
@@ -990,14 +1008,11 @@ export function loaderHook(input, options = {}) {
                   }
                   autoError = "WS 通道没有产出任何内容"
                 } else {
-                  const result = await openclawChat(creds, requestJson, { signal: init?.signal })
+                  const result = await openclawChat(creds, requestJson, relayOpts)
                   return openclawResponse(requestJson, result)
                 }
               } catch (e) {
                 autoError = String(e?.message ?? e).slice(0, 200)
-              } finally {
-                if (savedMode === undefined) delete process.env.MARVIS_WS_MODE
-                else process.env.MARVIS_WS_MODE = savedMode
               }
             }
           } else {

@@ -103,10 +103,19 @@ async function probeRelayReachable() {
   }
 }
 
-function cfg() {
+/**
+ * @param {string} [modeOverride] 显式模式（relay/remote/off），**单次请求**覆盖 env/文件配置。
+ *   用途：loader 的 4100404 自动 WS 回退要临时切 relay，但**不能改 process.env.MARVIS_WS_MODE**
+ *   —— 那是全局状态，await 期间并发请求会串味（A 号回退把 B 号也劫持到 WS）。
+ *   显式参数只影响本次调用链，天然并发安全。空值 = 维持原行为。
+ */
+function cfg(modeOverride = "") {
   const f = fileConfig()
   const handshake = env("MARVIS_HANDSHAKE", f.handshakeFile || f.handshake || "")
-  const explicitMode = env("MARVIS_WS_MODE", f.mode || "").toLowerCase()
+  const forced = String(modeOverride || "").trim().toLowerCase()
+  const explicitMode = (["relay", "remote", "off"].includes(forced)
+    ? forced
+    : env("MARVIS_WS_MODE", f.mode || "").toLowerCase())
   
   // 1. 显式配置优先
   if (["relay", "remote", "off"].includes(explicitMode)) {
@@ -245,8 +254,8 @@ export function openclawEnabled() {
 }
 
 /** 当前传输模式：relay | remote | off */
-export function openclawMode() {
-  return cfg().mode
+export function openclawMode(modeOverride = "") {
+  return cfg(modeOverride).mode
 }
 
 function handshakeCredentials(handshake) {
@@ -458,10 +467,10 @@ function killApp(cmd) {
  *
  * @param {{openid:string, accessToken:string, guid?:string}} creds
  * @param {{messages:any[], model?:string}} payload
- * @param {{signal?:AbortSignal}} [opts]
+ * @param {{signal?:AbortSignal, mode?:string}} [opts] mode=单次请求覆盖传输模式（relay/remote/off）
  */
-export async function* openclawChatStream(creds, payload, { signal } = {}) {
-  const c = cfg()
+export async function* openclawChatStream(creds, payload, { signal, mode } = {}) {
+  const c = cfg(mode)
   if (c.mode === "off") throw new Error("openclaw transport 已关闭（MARVIS_WS_MODE=off）")
 
   // relay 走本地 xiaobao 网关的 AG-UI 协议（event=agent.run + payload），
@@ -753,7 +762,7 @@ async function* openclawRemoteStream(creds, payload, c, { signal } = {}) {
  */
 export async function openclawChat(creds, payload, opts = {}) {
   // relay 经 gateway 通道，默认模型名沿用 gateway 的 "marvis-gateway"；remote 用 "marvis-ws"
-  const fallbackModel = openclawMode() === "relay" ? "marvis-gateway" : "marvis-ws"
+  const fallbackModel = openclawMode(opts.mode) === "relay" ? "marvis-gateway" : "marvis-ws"
   let text = ""
   let usedModel = ""
   for await (const frame of openclawChatStream(creds, payload, opts)) {
