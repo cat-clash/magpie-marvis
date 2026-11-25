@@ -20,6 +20,8 @@ if [ -z "${HOME:-}" ]; then
 fi
 NATIVE="$HOME/.magpie-marvis-native"
 GW="$DIR/Marvis-proxy-public"
+# 插件本体位置：phone-kit（Release 附件）里在 ./plugin；直接 clone 仓库时就是本目录
+if [ -f "$DIR/plugin/package.json" ]; then PLUGDIR="$DIR/plugin"; else PLUGDIR="$DIR"; fi
 
 echo "[1/4] 检查 Python"
 if ! command -v python3 >/dev/null 2>&1; then
@@ -54,12 +56,12 @@ EOF
 echo "  已写：$NATIVE/gateway.json  →  $URL"
 
 echo "[4/5] 复制诊断脚本到稳定目录"
-if [ -f "$DIR/scripts/magpie-marvis-diag.sh" ]; then
-  cp "$DIR/scripts/magpie-marvis-diag.sh" "$NATIVE/magpie-marvis-diag.sh"
+if [ -f "$PLUGDIR/scripts/magpie-marvis-diag.sh" ]; then
+  cp "$PLUGDIR/scripts/magpie-marvis-diag.sh" "$NATIVE/magpie-marvis-diag.sh"
   chmod +x "$NATIVE/magpie-marvis-diag.sh" 2>/dev/null || true
   echo "  已写：$NATIVE/magpie-marvis-diag.sh"
 else
-  echo "  跳过：仓库脚本 $DIR/scripts/magpie-marvis-diag.sh 不存在"
+  echo "  跳过：仓库脚本 $PLUGDIR/scripts/magpie-marvis-diag.sh 不存在"
 fi
 if [ "${1:-}" = "--no-start" ]; then
   echo "[5/5] 跳过启动（--no-start）。手动起：cd '$GW' && sh run.sh start"
@@ -81,7 +83,7 @@ echo "============================================================"
 echo "网关已就绪：$URL"
 echo ""
 echo "接下来在 magpie 里做三步（本脚本不代劳）："
-echo "  1) 导入插件：侧栏 ≡ → 控制后台 127.0.0.1:3430 → 插件 → 导入本地文件夹 → 选 $DIR/plugin"
+echo "  1) 导入插件：侧栏 ≡ → 控制后台 127.0.0.1:3430 → 插件 → 导入本地文件夹 → 选 $PLUGDIR"
 echo "  2) 网关加号登录：浏览器打开 http://127.0.0.1:$PORT/ → 账号池 → 加号登录（QQ/微信）"
 echo "  3) magpie 供应商 marvis → 添加账号 → 选「本地网关（手机推荐，免登录）」→ provider test"
 echo "============================================================"

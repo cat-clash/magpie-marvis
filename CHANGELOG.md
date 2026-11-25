@@ -1,5 +1,17 @@
 # 更新记录
 
+## 0.7.15 — 2026-11-25
+
+- **补齐真正能用的手机 phone-kit Release 附件**（此前文档写了「下载附件」，但仓库没有任何 Release，手机端只能拿到插件、拿不到 8088 网关，于是请求仍落到默认的 `ws://127.0.0.1:10123/` 而 503）：
+  - 新增 `scripts/build-phone-kit.mjs` + `tests/phone-kit.test.mjs`：自包含 store ZIP 写出器（固定时间戳、
+    UTF-8 标志、Unix 权限位，`.sh` 0755），把**插件本体 `plugin/` + Python 网关 `Marvis-proxy-public/` +
+    `phone-setup.sh`** 打成一个 `magpie-marvis-phone-kit.zip`。Python `zipfile.testzip()` 通过，
+    `phone-setup.sh` / `run.sh` 解压后均为 `0755`。
+  - `phone-setup.sh` 修掉路径不一致：脚本原先一边从 `$DIR/scripts/` 复制诊断脚本、一边提示导入
+    `$DIR/plugin/`。现在自动识别 `PLUGDIR`（Release 包在 `plugin/`，直接 clone 时就是仓库根），
+    复制路径与提示统一用 `$PLUGDIR`。
+  - `README-FINAL.md` 的 phone-kit 小节补上 v0.7.15 附件的直接下载链接；zip 的 sha256 仍只以 Release
+    页面的 asset digest 为准（文档会随包一起变，写死必然过期）。
 ## 0.7.14 — 2026-11-25
 
 - **把「导入电脑端登录态」提为手机端首选路径**（只改文档排序与措辞，插件行为不变）：

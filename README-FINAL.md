@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.7.14 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.7.15 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -184,7 +184,8 @@ node scripts/cli.mjs accounts list --json --config ~/.config/magpie   # 脚本�
 
 ### 最快路径：下载 phone-kit 附件，一条命令（gateway 通道）
 
-Release 附件 `magpie-marvis-phone-kit.zip` 已把**插件 + Python 网关 + 一键脚本**打在一起，
+Release 附件 `magpie-marvis-phone-kit.zip` 已把**插件 + Python 网关 + 一键脚本**打在一起
+（v0.7.15 直接下载：https://github.com/cat-clash/magpie-marvis/releases/download/v0.7.15/magpie-marvis-phone-kit.zip），
 不用分别 clone 两个仓库。解压后：
 
 ```sh
