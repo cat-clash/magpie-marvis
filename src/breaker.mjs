@@ -132,13 +132,38 @@ function readState() {
     if (data.version === 2 && data.accounts && typeof data.accounts === "object") {
       const out = {}
       for (const [k, v] of Object.entries(data.accounts)) {
-        if (v && typeof v === "object") out[k] = v
+        if (!v || typeof v !== "object") continue
+        // 0.8.1 自愈：account 作用域下全局桶 "*" 的冷却**只应由共因闸 trip() 产生**，
+        // 那种状态带 `reason:"cross-account"`。0.8.0 首版把 v1 旧冷却 / 失败开闸误写进
+        // "*" 桶（无 reason）→ 已升级用户重启后全体被挡。这类残留只保留计数、丢弃冷却。
+        // global 作用域下账号本来就落在 "*" 桶，跳过这个过滤，避免误伤。
+        if (
+          k === GLOBAL_BUCKET &&
+          !v.reason &&
+          riskScope() !== "global" &&
+          Number(v.openedAt) > 0
+        ) {
+          out[k] = { ...v, openedAt: 0, stale: true }
+        } else {
+          out[k] = v
+        }
       }
       return out
     }
-    // v1（扁平单账号格式）：整体归入全局桶 —— 老用户的冷却不会因升级丢失
+    // v1（扁平单账号格式）：整体归入全局桶 `"*"`，打 `v1:true` 标记。
+    // loadState() 见到这个标记只继承诊断计数、**不继承活跃冷却** ——
+    // v1 的语义是「整进程全局」，无法归因到具体账号；若把旧 openedAt 当全局桶的活跃冷却，
+    // 升级后所有账号一起被挡（与 0.8.0 目标相反）。下次状态变化落盘时自然迁移成 v2。
     if ("consecutiveOpens" in data || "openedAt" in data || "failures" in data) {
-      return { [GLOBAL_BUCKET]: data }
+      const opened = Number(data.openedAt)
+      return {
+        [GLOBAL_BUCKET]: {
+          consecutiveOpens: clampInt(data.consecutiveOpens),
+          openedAt: Number.isFinite(opened) ? opened : 0,
+          failures: clampInt(data.failures),
+          v1: true,
+        },
+      }
     }
     return {}
   } catch {
@@ -213,6 +238,7 @@ export function createBreaker({
   let halfOpen = false // 冷却已到期、等待探测结果
   let activeCooldown = 0 // 本次熔断最终冷却（含 jitter，熔断时刻定死）
   let loaded = false // 持久化状态是否已惰性加载
+  let tripReason = "" // 本次开闸来源：trip() 的外部原因（如 cross-account）；失败开闸留空
   const events = [] // 风险事件环形缓冲（纯内存，不落盘）
 
   /** 退避：base * 2^consecutive，封顶 8h（jitter 叠加在封顶值上） */
@@ -234,19 +260,23 @@ export function createBreaker({
     try {
       const data = readState()[bucket]
       if (!data || typeof data !== "object") return
+      consecutiveOpens = clampInt(data.consecutiveOpens)
+      failures = clampInt(data.failures)
+      // v1 迁移 / stale 残留：只继承上面两个诊断计数，活跃冷却丢弃（见 readState 注释）
+      if (data.v1 || data.stale) return
+      tripReason = typeof data.reason === "string" ? data.reason : ""
       const opened = Number(data.openedAt)
       if (Number.isFinite(opened) && opened > 0) {
         const age = now() - opened
         if (age < -CLOCK_SKEW_MS || age > MAX_COOLDOWN_MS) {
           // openedAt 领先当前时刻超过 5 分钟（时钟偏移）或状态总年龄超过冷却上限：
-          // 整个状态忽略 —— 冷却上限都过了，从零开始
+          // 忽略冷却，但保留失败计数（它们与时钟无关，是真实的诊断信息）
+          openedAt = 0
           return
         }
         openedAt = opened
         // activeCooldown 留 0：首次访问时按 consecutiveOpens 重算（重启后 jitter 重新随机）
       }
-      consecutiveOpens = clampInt(data.consecutiveOpens)
-      failures = clampInt(data.failures)
     } catch {
       /* 损坏 JSON / 目录不存在：当无状态 */
     }
@@ -258,6 +288,9 @@ export function createBreaker({
     const entry = { consecutiveOpens, openedAt, failures }
     if (label) entry.label = label
     else if (all[bucket]?.label) entry.label = all[bucket].label
+    // 开闸来源标记：只有 trip()（共因闸）产生的全局冷却带 reason。
+    // readState() 对全局桶无 reason 的残留做自愈（见 0.8.1 注释），所以必须在这里落盘。
+    if (tripReason) entry.reason = tripReason
     all[bucket] = entry
     writeState(all)
   }
@@ -296,6 +329,7 @@ export function createBreaker({
     activeCooldown = 0
     failures = 0
     consecutiveOpens = 0
+    tripReason = "" // 关闭后下次失败开闸是账号级，不能带上次的共因标记
     pushEvent("close", 0)
     persist()
   }
@@ -381,7 +415,8 @@ export function createBreaker({
       openedAt = now()
       halfOpen = false
       activeCooldown = computeCooldown(consecutiveOpens)
-      pushEvent(String(reason) || "external", activeCooldown)
+      tripReason = String(reason) || "external"
+      pushEvent(tripReason, activeCooldown)
       persist()
     },
     /** 最近 limit 条风险事件（内存环形缓冲 ≤50，不落盘；limit ≤ 0 返回空） */

@@ -157,20 +157,91 @@ test("持久化 v2：单文件多桶，A 开闸后 B 桶原样保留", (t) => {
   assert.equal(b2.open, false, "B 重启后照常可用")
 })
 
-test("v1 扁平格式向后兼容：旧状态读进全局桶，老用户冷却不丢", (t) => {
+test("v1 扁平格式迁移：计数保留进全局桶，但活跃冷却不继承（避免升级后全体被挡）", (t) => {
   const dir = freshNativeDir(t)
   const { now } = fakeClock()
   writeFileSync(
     join(dir, "breaker-state.json"),
-    JSON.stringify({ consecutiveOpens: 0, openedAt: now(), failures: 4 }),
+    JSON.stringify({ consecutiveOpens: 2, openedAt: now(), failures: 4 }),
   )
   const g = createBreaker({ bucket: "*", threshold: 5, cooldownMs: 60_000, now, random: ZERO_JITTER })
-  assert.equal(g.failures, 4, "旧扁平状态读进全局桶")
-  assert.equal(g.open, true, "旧冷却生效")
+  assert.equal(g.failures, 4, "旧失败计数读进全局桶（诊断保留）")
+  assert.equal(g.consecutiveOpens, 2, "旧退避次数也保留")
+  assert.equal(g.open, false, "★ 旧 openedAt 不继承：不然升级后所有账号一起被挡，与 0.8.0 目标相反")
+
+  // 下次状态变化落盘时写成 v2 多桶格式（loadState 只读不写，故先制造一次变化）
+  g.record(false) // failures 4→5 达阈值 → 本次是合法的新开闸
+  const raw = JSON.parse(readFileSync(join(dir, "breaker-state.json"), "utf8"))
+  assert.equal(raw.version, 2, "已迁移成 v2 多桶格式")
+  assert.equal(raw.accounts["*"].failures, 5)
+  assert.ok(raw.accounts["*"].openedAt > 0, "新的开闸用当前时刻，不是旧的那一刻")
 
   const acct = createBreaker({ bucket: uniq("fresh"), threshold: 5, cooldownMs: 60_000, now, random: ZERO_JITTER })
   assert.equal(acct.failures, 0, "账号桶不受旧全局状态影响")
   assert.equal(acct.open, false)
+})
+
+// —— 0.8.1 自愈：全局桶残留 vs 真共因闸冷却 ——
+
+test("全局桶残留（无 reason）被自愈：openedAt 清零，不再挡人（模拟用户真实污染文件）", (t) => {
+  const dir = freshNativeDir(t)
+  const { now } = fakeClock()
+  // 用户真实文件：0.8.0 首版把 v1 旧冷却写进 "*" 桶，无 reason
+  writeFileSync(
+    join(dir, "breaker-state.json"),
+    JSON.stringify({
+      version: 2,
+      accounts: {
+        "*": { consecutiveOpens: 0, openedAt: now() - 5 * 60_000, failures: 5 },
+      },
+    }),
+  )
+  const g = createBreaker({ bucket: "*", threshold: 5, cooldownMs: 1_800_000, now, random: ZERO_JITTER })
+  assert.equal(g.open, false, "★ 残留冷却被清：升级后不会全体被挡")
+  assert.equal(g.failures, 5, "失败计数保留（诊断用）")
+
+  const rows = breakerBuckets(now())
+  const slot = rows.find((r) => r.bucket === "*")
+  assert.ok(slot)
+  assert.equal(slot.retryAfterMs, 0, "CLI 也显示无冷却")
+})
+
+test("真共因闸冷却（带 reason=cross-account）保留：重启后仍挡所有账号", (t) => {
+  const dir = freshNativeDir(t)
+  const { now } = fakeClock()
+  writeFileSync(
+    join(dir, "breaker-state.json"),
+    JSON.stringify({
+      version: 2,
+      accounts: {
+        "*": { consecutiveOpens: 1, openedAt: now() - 60_000, failures: 2, reason: "cross-account" },
+      },
+    }),
+  )
+  const g = createBreaker({ bucket: "*", threshold: 5, cooldownMs: 1_800_000, now, random: ZERO_JITTER })
+  assert.equal(g.open, true, "★ 有 reason 的共因闸冷却保留")
+  assert.ok(g.retryAfterMs > 0)
+})
+
+test("trip() 落盘带 reason：自检能区分它和残留", (t) => {
+  const dir = freshNativeDir(t)
+  const { now } = fakeClock()
+  const g = getBreaker("*", "跨账号共因")
+  g.reset()
+  g.trip("cross-account")
+  const raw = JSON.parse(readFileSync(join(dir, "breaker-state.json"), "utf8"))
+  assert.equal(raw.accounts["*"].reason, "cross-account", "trip 开闸落盘写 reason 标记")
+  assert.ok(raw.accounts["*"].openedAt > 0)
+})
+
+test("通道级共因闸开着时：即使账号自己没被拦，loader 也必须挡住（读取全局桶 open）", (t) => {
+  const src = readFileSync(join(HERE, "..", "src", "hooks", "loader.mjs"), "utf8")
+  // 回归防护：0.8.0 首版只检查 breaker.open（账号桶），漏了全局桶 —— 通道级封锁时所有账号照常出网。
+  assert.match(src, /channelBreaker = acctBucket === "\*" \? breaker : getBreaker\("\*", "跨账号共因"\)/,
+    "必须取全局桶（共因闸开的那个）")
+  assert.match(src, /\(breaker\.open \|\| channelBreaker\.open\)/, "两个桶任一开闸都要挡")
+  assert.match(src, /channelWide/, "文案要区分账号级与通道级")
+  assert.match(src, /通道级风控冷却中/, "通道级文案明确告知所有账号都停了")
 })
 
 test("共因闸：两个不同账号接连被拦 → 判定通道级封锁，全局桶也开", (t) => {

@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.8.0）
+# 腾讯 Marvis · magpie 供应商插件（0.8.1）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.16）
+## 传输通道（0.8.1）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -37,7 +37,7 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 – 0.8.0 新增（手机上最常用的几条）
+## 0.7.4 – 0.8.1 新增（手机上最常用的几条）
 
 - **多账号互不牵连：熔断 / 节奏闸按账号分桶**（0.8.0，默认开启，PC 与手机同效）：以前一个账号被
   `4100404` 拦住会让**所有**账号一起停（进程级单例熔断 + 单条 pacing 时间轴）。现在每个账号各有一条
@@ -46,6 +46,8 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
   想找回旧的「一个号出事全停」：`MARVIS_RISK_SCOPE=global` 与 `MARVIS_PACING_SCOPE=global`。
   多个账号**接连**被拦（默认 2 个 / 10 分钟内）说明拦的是通道而不是账号，这时才会自动回到全局冷却
   （`MARVIS_RISK_CONSENSUS` 可调，设 0 = 纯隔离）。
+  **0.8.1 修了两个首版回归**：① 全局冷却打开时 loader 现在也检查并挡住（0.8.0 只看账号桶，漏了）；
+  ② 从旧版升级时不再继承历史冷却 —— 老 `breaker-state.json` 的全局残留会自动清零，不会升级后被全体挡住。
 
 - **首选：直接把电脑端登录态导到手机**（0.7.14 起首选路径）：不用扫码、不用守着电脑 ——
   电脑 magpie 配置目录的 `plugin-auth.json` 里把 `marvis#` 开头的条目导出成一个小 JSON，手机 Termux 里跑

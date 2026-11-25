@@ -481,6 +481,10 @@ export function loaderHook(input, options = {}) {
     const acctBucket = riskScope() === "global" ? "*" : accountKeyOf(creds)
     const acctLabel = accountLabelOf(creds)
     const breaker = getBreaker(acctBucket, acctLabel)
+    // 全局桶（通道级）：只可能被「跨账号共因闸」打开 —— 多个不同账号接连被拦时，
+    // 判定拦的是通道而不是账号，此时必须对所有账号一起停（否则每个号都要轮流撞一遍）。
+    // account 作用域下这条路平时是关的；MARVIS_RISK_SCOPE=global 时它就是 acctBucket 本身。
+    const channelBreaker = acctBucket === "*" ? breaker : getBreaker("*", "跨账号共因")
     if (!viaGateway && (!creds.accessToken || !creds.openid)) {
       // 被 `accounts logout` 取消登录的账号：给壳明确的「需要重新登录」信号，
       // 不要静默 return {}（那看起来像插件坏了）。
@@ -796,17 +800,23 @@ export function loaderHook(input, options = {}) {
         // 让账号自然冷却，而不是陪着宿主的默认重试策略把冷却时间撞得更长（issue #71）。
         // WS（remote/relay）走的是手机会话域，另一个风控域，不受此熔断约束。
         // 0.8.0 起熔断按账号分桶：这里只挡**当前这个账号**，其他账号照常出网。
-        if (!openclawEnabled() && breaker.open) {
-          return riskResponse(
-            "risk_cooldown",
-            `账号「${acctLabel}」风控冷却中：连续 ${breaker.failures} 次被 4100404 拦截，` +
-              `插件已暂停这个账号出网 ${Math.ceil(breaker.retryAfterMs / 60_000)} 分钟` +
+        // 例外是全局桶（跨账号共因闸）：多个不同账号接连被拦 → 判定通道级封锁 → 全体暂停。
+        if (!openclawEnabled() && (breaker.open || channelBreaker.open)) {
+          const channelWide = channelBreaker.open && channelBreaker !== breaker
+          const gate = channelWide ? channelBreaker : breaker
+          const minutes = Math.ceil(gate.retryAfterMs / 60_000)
+          const message = channelWide
+            ? `通道级风控冷却中：多个不同账号接连被 4100404 拦住，判定拦的是通道（uskey / UA / IP / ` +
+              `上游节点），插件已暂停**所有账号**出网 ${minutes} 分钟。换账号没用 —— ` +
+              "该换 IP、重签 uskey，或设 MARVIS_WS_MODE=remote 改走 WS 通道。" +
+              "MARVIS_RISK_CONSENSUS=0 可关闭这个共因闸（此后纯按账号隔离）。"
+            : `账号「${acctLabel}」风控冷却中：连续 ${breaker.failures} 次被 4100404 拦截，` +
+              `插件已暂停这个账号出网 ${minutes} 分钟` +
               "（**其他账号不受影响**；换 IP/UA 无效，等冷却结束，或给这个账号设 " +
               "MARVIS_WS_MODE=remote 改走 WS 通道）。" +
               "MARVIS_RISK_COOLDOWN_MS=0 可禁用熔断；MARVIS_RISK_SCOPE=global 可退回全局冷却；" +
-              "node scripts/cli.mjs breaker reset <账号> 可立刻解封。",
-            breaker.retryAfterMs / 1000,
-          )
+              "node scripts/cli.mjs breaker reset <账号> 可立刻解封。"
+          return riskResponse("risk_cooldown", message, gate.retryAfterMs / 1000)
         }
 
         let response

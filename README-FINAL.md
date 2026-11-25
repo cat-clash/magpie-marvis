@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.8.0 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.8.1 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -222,7 +222,7 @@ node scripts/cli.mjs accounts list --json --config ~/.config/magpie   # 脚本�
 ### 最快路径：下载 phone-kit 附件，一条命令（gateway 通道）
 
 Release 附件 `magpie-marvis-phone-kit.zip` 已把**插件 + Python 网关 + 一键脚本**打在一起
-（Release 页：https://github.com/cat-clash/magpie-marvis/releases/tag/v0.7.16）。
+（Release 页：https://github.com/cat-clash/magpie-marvis/releases/tag/v0.8.1）。
 不用分别 clone 两个仓库。
 
 ```sh
@@ -235,7 +235,7 @@ sh phone-setup.sh                        # 起网关 + 写 gateway.json + 打印
 > ① 手机浏览器先登录 `github.com/cat-clash`（登录态保留后点 Release 页的附件即可下载）；
 > ② 更省事 —— 在电脑上用已登录的 gh CLI 下载，再把文件送到手机：
 > ```sh
-> gh release download v0.7.16 -R cat-clash/magpie-marvis -p '*.zip'
+> gh release download v0.8.1 -R cat-clash/magpie-marvis -p '*.zip'
 > # 得到 magpie-marvis-phone-kit.zip，微信文件传输助手 / 数据线拷到手机
 > ```
 > 请用 `sh phone-setup.sh` 调用：zip 解压后脚本可能没有可执行位，直接 `./phone-setup.sh` 会报

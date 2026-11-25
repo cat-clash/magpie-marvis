@@ -142,20 +142,21 @@ test("半开成功：关闭并清零 consecutiveOpens / failures，退避从头�
 test("持久化 roundtrip：新实例恢复 openedAt / consecutiveOpens / failures 并继续倒数", (t) => {
   const dir = freshNativeDir(t)
   const { now, advance } = fakeClock()
-  const a = createBreaker({ threshold: 1, cooldownMs: 10_000, now, random: ZERO_JITTER })
+  // 用账号桶：全局桶 "*" 的无 reason 冷却会被 0.8.1 自愈清掉（那是污染残留专用逻辑）
+  const a = createBreaker({ bucket: "persist-a", threshold: 1, cooldownMs: 10_000, now, random: ZERO_JITTER })
   a.record(false) // 开闸：consec 0，冷却 10_000
   advance(10_000) // 到期 → 半开
   a.record(false) // 探测失败重开：consec 1，冷却 20_000
   advance(5_000) // 走到一半
   const disk = JSON.parse(readFileSync(join(dir, "breaker-state.json"), "utf8"))
-  // 0.8.0：状态文件升为 v2 多桶格式，无 bucket 参数的实例落在全局桶 "*"
+  // 0.8.0：状态文件升为 v2 多桶格式
   assert.equal(disk.version, 2)
-  const slot = disk.accounts["*"]
+  const slot = disk.accounts["persist-a"]
   assert.equal(slot.consecutiveOpens, 1)
   assert.equal(slot.openedAt, 1_010_000)
   assert.equal(slot.failures, 2)
   // 新实例（同目录、同时钟）：恢复状态继续熔断
-  const b = createBreaker({ threshold: 1, cooldownMs: 10_000, now, random: ZERO_JITTER })
+  const b = createBreaker({ bucket: "persist-a", threshold: 1, cooldownMs: 10_000, now, random: ZERO_JITTER })
   assert.equal(b.open, true, "新实例加载持久化状态仍熔断")
   assert.equal(b.consecutiveOpens, 1)
   assert.equal(b.failures, 2)
@@ -180,17 +181,18 @@ test("openedAt 在未来超过 5 分钟：时钟偏移，整个状态忽略；5 
   const { now } = fakeClock(1_000_000)
   writeFileSync(
     join(dir, "breaker-state.json"),
-    JSON.stringify({ consecutiveOpens: 2, openedAt: now() + 10 * 60_000, failures: 9 }),
+    JSON.stringify({ version: 2, accounts: { "clock-skew-a": { consecutiveOpens: 2, openedAt: now() + 10 * 60_000, failures: 9 } } }),
   )
-  const b = createBreaker({ threshold: 1, cooldownMs: 1_000, now, random: ZERO_JITTER })
+  // 用账号桶验证通用时钟逻辑：全局桶 "*" 的残留会被 0.8.1 自愈逻辑清掉（那是另一条测试线）
+  const b = createBreaker({ bucket: "clock-skew-a", threshold: 1, cooldownMs: 1_000, now, random: ZERO_JITTER })
   assert.equal(b.open, false, "未来时间戳忽略")
-  assert.equal(b.failures, 0, "整个状态被忽略")
+  assert.equal(b.failures, 9, "时钟偏移只丢弃冷却，失败计数保留")
   const dir2 = freshNativeDir(t)
   writeFileSync(
     join(dir2, "breaker-state.json"),
-    JSON.stringify({ consecutiveOpens: 0, openedAt: now() + 4 * 60_000, failures: 1 }),
+    JSON.stringify({ version: 2, accounts: { "clock-skew-b": { consecutiveOpens: 0, openedAt: now() + 4 * 60_000, failures: 1 } } }),
   )
-  const b2 = createBreaker({ threshold: 1, cooldownMs: 1_000, now, random: ZERO_JITTER })
+  const b2 = createBreaker({ bucket: "clock-skew-b", threshold: 1, cooldownMs: 1_000, now, random: ZERO_JITTER })
   assert.equal(b2.open, true, "偏移 4 分钟（≤5min）视为有效状态")
 })
 
@@ -199,11 +201,11 @@ test("状态总年龄超过冷却上限（8h）视为已关闭", (t) => {
   const { now } = fakeClock(100_000_000) // 时钟起点要足够大，保证 openedAt 为正
   writeFileSync(
     join(dir, "breaker-state.json"),
-    JSON.stringify({ consecutiveOpens: 3, openedAt: now() - (8 * 60 * 60 * 1_000 + 1), failures: 5 }),
+    JSON.stringify({ version: 2, accounts: { "stale-age": { consecutiveOpens: 3, openedAt: now() - (8 * 60 * 60 * 1_000 + 1), failures: 5 } } }),
   )
-  const b = createBreaker({ threshold: 1, cooldownMs: 1_000, now, random: ZERO_JITTER })
+  const b = createBreaker({ bucket: "stale-age", threshold: 1, cooldownMs: 1_000, now, random: ZERO_JITTER })
   assert.equal(b.open, false)
-  assert.equal(b.failures, 0)
+  assert.equal(b.failures, 5, "过期只丢弃冷却，失败计数保留")
 })
 
 test("MARVIS_RISK_THRESHOLD / MARVIS_RISK_COOLDOWN_MS 环境变量覆盖", (t) => {
