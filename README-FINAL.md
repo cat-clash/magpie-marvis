@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.7.13 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.7.14 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -109,6 +109,24 @@ node tools/extract-native.mjs    # 从 Program Files\Tencent\Marvis\Application\
 > QQ 登录另外用 `mqqapi://forward/url` 真正唤起手机 QQ App（`display=mobile` 只影响网页版布局，
 > 不会唤起 App）。
 
+#### 首选：把电脑端登录态导到手机（0.7.14 起首选路径）
+
+> **最省事的登录方式：不用扫码，也不用守着电脑。**
+> 电脑端 magpie 已经登录过 Marvis 的话，不必在手机上折腾扫码：把电脑
+> `~/.config/magpie/plugin-auth.json` 里 `marvis#` 开头的条目单独存成 `login.json`
+> （只放这几条即可），拷到手机后执行：
+>
+> ```sh
+> node scripts/cli.mjs import-login login.json --yes
+> ```
+>
+> 会先备份手机的 `plugin-auth.json`，再把条目合并进去（默认不覆盖同名键，要覆盖加 `--overwrite`），
+> 只处理 `marvis#` / `marvis-proxy` 前缀，别的插件的凭据不动。之后**完全退出 magpie 再打开**即可看到账号。
+> 想先看会做什么：加 `--dry-run`；要机器可读结果：加 `--json`。
+
+> 之所以把它提到最前：微信扫码那条路（下一节）因为 appid 只能是网站应用，必须「电脑出码 + 手机扫」，
+> 中间还得把回调地址整条粘回来；而导入登录态只要一个文件加一条命令，一次搞定。
+
 #### 微信在手机上为什么一定要「电脑出码」
 
 > 0.7.10 的真机定论：Marvis 的 appid 是**网站应用**，只有 `snsapi_login`（`qrconnect` 扫码权限），
@@ -122,7 +140,7 @@ node tools/extract-native.mjs    # 从 Program Files\Tencent\Marvis\Application\
 > 页面底部另有一条「公众号网页授权（实验）」链接：那个功能本身对 Marvis 这个 appid 无效（会 10005），
 > 只当说明留着，别在那上面耗时间。
 
-手机登录 4 步：
+手机登录 4 步（**备用路径** —— 能把电脑登录态导过来就别走这套）：
 
 1. 供应商 `marvis` → 添加账号 → 点 **QQ 登录 / 微信登录**（手机端排在最前；「本地网关（免登录）」占位账号在真登录之后）。
 2. 点宿主给出的「打开浏览器」按钮 —— QQ 会唤起已装的手机 QQ（没装则网页版登录）；
@@ -135,21 +153,8 @@ node tools/extract-native.mjs    # 从 Program Files\Tencent\Marvis\Application\
 4. 把那条地址粘贴到登录界面的 **Code 输入框**提交。**只在壳里粘**：本机引导页
    （`http://127.0.0.1:4618/`）只负责给按钮和步骤，**不接收粘贴**（0.7.12 起 `/submit` 一律 410）——
    在那边提交的话，壳收不到结果、账号不会出现在插件里，而且那一次 `code` 会被页面这一侧先用掉，
-   再粘回壳反而报错。若壳版本没有 Code 输入框，改用下面的 CLI 导入登录态。
+   再粘回壳反而报错。若壳版本没有 Code 输入框，就别在这条路上耗，直接用上面「首选：把电脑端登录态导到手机」。
 
-#### 更省事：把电脑端登录态导到手机（0.7.10）
-
-> 电脑端 magpie 已经登录过 Marvis 的话，不必在手机上折腾扫码：把电脑
-> `~/.config/magpie/plugin-auth.json` 里 `marvis#` 开头的条目单独存成 `login.json`
-> （只放这几条即可），拷到手机后执行：
->
-> ```sh
-> node scripts/cli.mjs import-login login.json --yes
-> ```
->
-> 会先备份手机的 `plugin-auth.json`，再把条目合并进去（默认不覆盖同名键，要覆盖加 `--overwrite`），
-> 只处理 `marvis#` / `marvis-proxy` 前缀，别的插件的凭据不动。之后**完全退出 magpie 再打开**即可看到账号。
-> 想先看会做什么：加 `--dry-run`；要机器可读结果：加 `--json`。
 gateway 通道仍然推荐（账号池在网关侧维护），但**不再是手机唯一的出路**——想单独用手机 magpie 的，
 直接按上面 4 步登录即可。仍然**不要折腾 adb+frida 抓 handshake.log**（凭据 15–20 分钟就失效，
 那条 remote 路不适合手机）。
