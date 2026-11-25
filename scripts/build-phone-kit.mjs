@@ -87,6 +87,9 @@ export function buildZip(entries) {
 
 const IGNORE_PLUGIN = new Set([".git", "node_modules", "dist", "tests", ".DS_Store"])
 const IGNORE_GATEWAY = new Set([".git", "__pycache__", ".pytest_cache", "node_modules", ".DS_Store"])
+// 运行时状态与备份文件绝不进发行包：breaker-state.json 是本机熔断/冷却状态，
+// 带 .bak 的多半是别的机器/别的时刻的污染快照 —— 装到新机必须从零开始。
+const IGNORE_FILE = [/^breaker-state\.json/, /\.bak($|\.)/]
 
 function walk(base, prefix, ignore, out) {
   const dirs = []
@@ -103,6 +106,7 @@ function walk(base, prefix, ignore, out) {
     walk(join(base, d), `${prefix}${d}/`, ignore, out)
   }
   for (const f of files) {
+    if (IGNORE_FILE.some((re) => re.test(f))) continue
     const mode = f.endsWith(".sh") ? 0o100755 : 0o100644
     out.push({ name: `${prefix}${f}`, data: readFileSync(join(base, f)), mode })
   }
