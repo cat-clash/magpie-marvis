@@ -185,7 +185,7 @@ printf '\nNEXT_ACTION: '
 if [ "$PORT_8088_OK" -eq 1 ] && [ "$MODELS_HTTP" = "200" ]; then
   printf '%s\n' '8088 HTTP 网关可用。若仍报 503：请确认 MARVIS_GATEWAY_URL=http://127.0.0.1:8088/v1 且 MARVIS_TRANSPORT=gateway（或 gateway.json.mode=gateway）；同时确认网关账号池与 maggie 占位账号都有号。若报的是 ws://127.0.0.1:10123/，说明当前是 AG-UI relay 通道，需设置 MARVIS_WS_MODE=remote 或启动 PC relay，MARVIS_GW_URL 与 MARVIS_GATEWAY_URL 是两条不同链路。'
 elif [ "$PORT_8088_OK" -eq 1 ]; then
-  printf '%s\n' '8088 有监听但 /v1/models 非 200。优先在 Python 网关侧排查账号池/登录状态；不要把 MARVIS_GW_URL 指向 http 端点。'
+  printf '%s\n' '8088 有监听但 /v1/models 非 200。401 = 网关开了 key 鉴权而 gateway.json 的 key 为空；000 = curl 不可用/超时；其余先看网关侧日志与账号池。不要把 MARVIS_GW_URL 指向 http 端点。'
 elif [ "$PORT_10123_OK" -eq 1 ]; then
   printf '%s\n' '10123 有监听而 8088 无监听。若你走 PC relay：确认 token 与协议；若你走手机 HTTP 网关：启动 phone-setup.sh / run.sh 让 8088 监听，再写 gateway.json。'
 else
@@ -196,13 +196,28 @@ printf '\nCONFIG_ORDER: '
 if [ "$GW_JSON_EXISTS" -eq 1 ]; then
   printf '%s\n' 'gateway.json 存在。源码优先级：MARVIS_GATEWAY_CONFIG 指定文件 > ~/.magpie-marvis-native/gateway.json > 插件 native/gateway.json；同名 env 变量 > 文件 > 默认。'
 else
-  printf '%s\n' 'gateway.json 不存在。未显式配置时，localgateway 会在 1.5s 内探测 8088/v1/models，可达才自动走 gateway；建议直接创建 gateway.json 固化配置。'
+  printf '%s\n' 'gateway.json 不存在。未显式配置时，localgateway 会在 1.5s 内探测 8088/v1/models，可达才自动走 gateway；直接跑本脚本 --fix 即可固化配置。'
 fi
 
+printf '\nCODE_MEANING:\n'
+printf '%s\n' '  200 → 网关活着且能应答（但**不代表**网关侧有登录账号，503 no_account 仍可能）。'
+printf '%s\n' '  401 → 网关开了 key 鉴权，而 gateway.json 的 key 是空串：把 key 填对，或在网关侧关掉鉴权。'
+printf '%s\n' '  000 → curl 不可用或请求超时（Termux: pkg install curl -y），**不等于**网关没登录。'
+printf '%s\n' '  其他非 200 → 网关进程在但内部异常，看网关侧日志。'
+
 printf '\n建议的手机 HTTP 网关最小修复（仅在确认使用 8088 Python 网关时）：\n'
+printf '%s\n' '  # ① 首选：本脚本 --fix（会自己写含 schemaVersion 的 gateway.json，'
+printf '%s\n' '  #    端口按 ~/Marvis-proxy-public/config.json 取，不会把端口写死成 8088；'
+printf '%s\n' '  #    写完再尝试启动网关并轮询 /v1/models 最多 12 秒）'
+printf '%s\n' '  sh ~/.magpie-marvis-native/magpie-marvis-diag.sh --fix'
+printf '%s\n' '  # ② 降级：--fix 跑不了才手工写，端口必须与网关实际监听一致'
+printf '%s\n' '  #   mkdir -p ~/.magpie-marvis-native'
+printf '%s\n' '  #   cat > ~/.magpie-marvis-native/gateway.json <<EOF'
+printf '%s\n' '  #   {"schemaVersion":1,"mode":"gateway","url":"http://127.0.0.1:8088/v1","key":"","timeoutMs":600000}'
+printf '%s\n' '  #   EOF'
+printf '%s\n' '  # ③ 环境变量只对当前 Termux 会话有效（关窗口即失效），持久化靠上面的 gateway.json：'
 printf '%s\n' '  export MARVIS_GATEWAY_URL=http://127.0.0.1:8088/v1'
 printf '%s\n' '  export MARVIS_TRANSPORT=gateway'
-printf '%s\n' '  # 或写入 gateway.json: {"mode":"gateway","url":"http://127.0.0.1:8088/v1","timeoutMs":600000}'
 printf '%s\n' '  # 若错误仍指向 ws://127.0.0.1:10123/，那是 AG-UI WS 通道：设置 MARVIS_WS_MODE=remote 或启动 PC relay。'
 printf '\nDONE\n'
 
@@ -271,6 +286,6 @@ EOF
   printf '  gateway_json : %s\n' "$GW_JSON"
   printf '  url          : %s\n' "$URL"
   printf '  listening    : %s\n' "$FIX_RUNNING"
-  printf '  next         : magpie 里点「测试模型」；仍 503 就再跑一次本脚本看 models_http_code\n'
+  printf '  next         : %s\n' 'listening=0 → 看上面 GATEWAY 行与 ~/.magpie-marvis-native/gateway-start.log；listening=1 仍 503 → 网关侧账号池是空的（去网关登录，并确认 magpie 里挂了「本地网关（免登录）」占位账号）'
 fi
 exit 0

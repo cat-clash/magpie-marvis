@@ -1,5 +1,19 @@
 # 更新记录
 
+## 0.7.13 — 2026-11-25
+
+- **`scripts/magpie-marvis-diag.sh` 的收尾换成能直接判读的**（只改诊断输出，不改插件行为）：
+  - 新增 `CODE_MEANING` 段解释 `models_http_code`：`200` = 网关活着且能应答，但**不代表**网关侧有登录账号
+    （`no_account` 的 503 仍可能）；`401` = 网关开了 `MARVIS_GATEWAY_KEY` 而 `gateway.json` 的 `key` 是空串
+    （源码 `localgateway.mjs:184` 是 `if (c.key)`，空串不带鉴权头）；`000` = curl 不可用或请求超时，
+    **不等于**网关没登录；其他非 200 → 看网关侧日志。
+  - 「建议的手机 HTTP 网关最小修复」改成三步主次分明：① **首选 `--fix`** —— 它自己写含 `schemaVersion:1`
+    的 `gateway.json`，端口从 `~/Marvis-proxy-public/config.json` 取（不会把端口写死 8088）；② 手工
+    `printf`/`cat` 只是 `--fix` 跑不了时的降级；③ `export` 只对当前 Termux 会话有效，持久化靠 `gateway.json`。
+  - `FIX_RESULT.next` 从「再跑一次本脚本」改成可执行判读：`listening=0` → 看 GATEWAY 行与
+    `~/.magpie-marvis-native/gateway-start.log`；`listening=1` 仍 503 → 网关侧账号池是空的。
+  - `NEXT_ACTION` 的「8088 有监听但非 200」分支补上 `401`/`000` 的区分。
+- 测试：`tests/diag-script.test.mjs` 5 例 + `tests/failure-hints.test.mjs` 10 例全过（15/15）。
 ## 0.7.12 — 2026-11-25
 
 - **撤掉本机引导页里的粘贴框**（真机反馈：在那儿提交显示「登录成功」，插件里却没有账号）：

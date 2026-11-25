@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.12）
+# 腾讯 Marvis · magpie 供应商插件（0.7.13）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.12）
+## 传输通道（0.7.13）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -35,7 +35,7 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 – 0.7.12 新增（手机上最常用的几条）
+## 0.7.4 – 0.7.13 新增（手机上最常用的几条）
 
 - **微信登录：二维码要放到电脑上看，手机微信扫**（0.7.10 定论）：真机两次被微信打回后才确认 ——
   Marvis 的 appid 是**网站应用**（只有 `snsapi_login` 扫码权限），**不是公众号**，所以
@@ -44,6 +44,11 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
   二维码页，微信又禁止长按/相册识别二维码，所以**一台手机扫不了自己的屏**。可行链路只有一条：
   点「复制授权链接」→ 在**电脑**浏览器打开（屏幕出现二维码）→ 这台手机微信「扫一扫」→
   电脑跳到 `yybadaccess…code=…` → 整条粘回 magpie。页面另有「分享到微信（可选）」把链接送去电脑。
+- **诊断脚本的收尾改成能直接判读的**（0.7.13）：`magpie-marvis-diag.sh` 新增 `CODE_MEANING` 段
+  （`401` = 网关开了 key 鉴权而 `gateway.json` 的 key 是空串；`000` = curl 不可用/超时，**不是**网关没登录；
+  `200` 只证明网关活着，**不代表**账号池有号），并写明「① 首选 `--fix`（自己写含 `schemaVersion` 的
+  `gateway.json`、端口按 `Marvis-proxy-public/config.json` 取）② 手工写只是降级 ③ `export` 只对当前 Termux
+  会话有效」。`FIX_RESULT.next` 直接给出：`listening=1` 仍 503 → 网关账号池为空。
 - **本机引导页不接收粘贴，只在壳里粘 Code**（0.7.12）：之前引导页上有个「完成登录」框，
   在那儿提交会显示「登录成功」但插件里没有账号 —— 壳只有在 `callback()` 被调用且没给粘贴内容时
   才会取本地页的结果，用户在页面这侧提交壳根本不知道；更糟的是 `code` 已被这一侧消费，
