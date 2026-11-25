@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.7.16 — 2026-11-25
+
+- **仓库转私有后的 phone-kit 下载说明**（纯文档，插件行为不变）：匿名访问 Release 附件直链会返回 404，
+  raw 文件也返回 404。`README-FINAL.md` 的 phone-kit 小节改为指向 Release 页，并给出两条可用下载方式：
+  ① 手机浏览器先登录 `github.com/cat-clash`；② 电脑上用已登录的 gh CLI
+  `gh release download v0.7.16 -R cat-clash/magpie-marvis -p '*.zip'`，再把 zip 用微信文件传输助手/数据线送到手机。
+  Release 附件里的插件文档同步为本版本。
 ## 0.7.15 — 2026-11-25
 
 - **补齐真正能用的手机 phone-kit Release 附件**（此前文档写了「下载附件」，但仓库没有任何 Release，手机端只能拿到插件、拿不到 8088 网关，于是请求仍落到默认的 `ws://127.0.0.1:10123/` 而 503）：

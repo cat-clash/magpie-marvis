@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.15）
+# 腾讯 Marvis · magpie 供应商插件（0.7.16）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -6,7 +6,7 @@
 > Claude Sonnet/Opus 4.6、GPT-5.4、Hy3、HY-Vision 2.0 接进 magpie / OpenCode，
 > QQ / 微信登录，不用粘贴 key。**PC 与手机通用（手机通过本地 OpenAI 网关）。**
 
-## 传输通道（0.7.15）
+## 传输通道（0.7.16）
 
 | 模式 | 说明 | 适用 |
 |---|---|---|
@@ -35,7 +35,7 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 – 0.7.15 新增（手机上最常用的几条）
+## 0.7.4 – 0.7.16 新增（手机上最常用的几条）
 
 - **首选：直接把电脑端登录态导到手机**（0.7.14 起首选路径）：不用扫码、不用守着电脑 ——
   电脑 magpie 配置目录的 `plugin-auth.json` 里把 `marvis#` 开头的条目导出成一个小 JSON，手机 Termux 里跑
