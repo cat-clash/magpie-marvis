@@ -146,30 +146,33 @@ export function wxAppLaunchUrl() {
 }
 
 /**
- * 微信授权提示 —— 首选「分享到微信」（Android 系统分享面板），备用「唤起微信 App + 复制授权链接」。
+ * 微信授权提示 —— 主路径是「扫码页放到另一台设备（电脑）上，手机微信扫」。
  *
- * `qrconnect` 是**网站应用扫码登录**页，系统浏览器打开只显示二维码，需要另一台设备扫；
- * 保存图片再扫的链路微信已收紧，一台手机完成不了。0.7.9 起主链接改用**公众号网页授权**
- * `oauth2/authorize?scope=snsapi_base#wechat_redirect`（微信内打开静默跳回带 code）。
- * 正确做法（首选分享，省掉手动复制粘贴）：
- *   ① 点「分享到微信（推荐）」→ 系统分享面板选「微信」→「文件传输助手」→ 发送；
- *   ② 在微信里点开这条链接 —— 直接跳转授权（可能一闪而过）；
- *   ③ 跳转后复制 `yybadaccess…` 回调地址粘贴回 magpie。
- * 备用（浏览器不支持 navigator.share 时）：
- *   ① 点「唤起微信」按钮（`weixin://`）打开微信 App；
- *   ② 点「复制授权链接」，粘贴到微信「文件传输助手」（或任意聊天）并发送；
- *   ③ 同样在微信里点开，跳转后复制回调地址。
- * ⚠ scope 必须是 snsapi_base：snsapi_userinfo 真机报 10005（公众号未认证没该权限）。
- * 若网页授权仍被拒（10005），页面底部还有 qrconnect 扫码链接（需另一台设备/电脑）。
- * 不再引导保存/识别二维码图片。
- *
- * @returns {string}
+ * ⚠⚠ 0.7.10 方向纠正（真机实测两次踩空后确认）：
+ *   Marvis 的 appid 是**网站应用**（open.weixin.qq.com 网站应用，只有 `snsapi_login`），
+ *   **不是公众号**。所以 `connect/oauth2/authorize`（公众号网页授权，snsapi_base /
+ *   snsapi_userinfo）在微信内一律报「此公众号并没有这些scope的权限，错误码:10005」——
+ *   0.7.8 用 userinfo、0.7.9 改 base，结果都是 10005。改 scope 没有意义，是 appid 类型问题。
+ *   唯一能用的是 `connect/qrconnect?scope=snsapi_login`（200 二维码页）——但它需要
+ *   **另一台设备**来扫；微信已禁止长按/相册识别二维码（「该二维码仅支持在扫一扫时，
+ *   通过摄像头来识别」），所以一台手机自己扫自己屏幕是走不通的。
+ * 正确做法：
+ *   ① 点「分享到微信」把授权链接发到「文件传输助手」，或直接复制链接；
+ *   ② 在**电脑**（或第二台手机/iPad）的浏览器里打开这条链接 —— 屏幕上出现二维码；
+ *   ③ 用同一台手机上的微信「扫一扫」扫电脑屏幕 → 手机上点「确认登录」；
+ *   ④ 电脑浏览器会跳到 `yybadaccess…marvis_oauth?…code=…`，把那条地址整条复制回手机粘贴。
+ * 页面另给「实验：公众号网页授权」链接：只有当某个 appid 真的是已认证公众号时才有效，
+ * Marvis 这个 appid 会 10005，所以只作说明用途，不作为主路径。
  */
 export const WECHAT_OPEN_HINT =
-  "微信授权首选「分享到微信（推荐）」：点它后在系统分享面板选「微信」→「文件传输助手」→ 发送，" +
-  "在微信里点开链接就会直接跳到授权（网页授权，可能一闪而过）。这是微信「网页授权」，必须在微信里打开（不要用系统浏览器直接开这个链接）；一台手机全程完成，不用扫码，也不要保存二维码图片（一台手机扫不了自己的码）。" +
-  "备用：点「唤起微信」打开微信，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」并发送，在微信里点开它同样会跳转授权。" +
-  "若微信提示「该公众号没有这些scope的权限 / 错误码 10005」或页面打不开，用页面最下面的**扫码链接**（需要另一台设备扫，或让电脑打开）。"
+  "微信登录用的是**网站应用扫码登录**，二维码必须出现在**另一台设备**上看（手机微信已不支持长按/相册识别二维码）。" +
+  "做法：点「复制授权链接」→ 在**电脑**浏览器里打开这条链接 → 电脑屏幕出现二维码 → " +
+  "（也可以点「分享到微信」把链接发到「文件传输助手」，再在电脑上点开。）" +
+  "用这台手机的微信「扫一扫」扫电脑屏幕 → 手机上点「确认登录」" +
+  "→ 电脑浏览器跳到 yybadaccess…code=… 地址后，把整条地址复制回手机粘贴。" +
+  "⚠ 一台手机扫不了自己的码 —— 微信只认摄像头实时扫描，所以二维码必须显示在另一块屏幕（电脑）上。" +
+  "⚠ 不要保存二维码图片再扫（微信会提示只支持摄像头识别）。" +
+  "⚠ 页面最下面的「公众号网页授权」链接对 Marvis 的 appid 无效（会报 10005），仅当该 appid 是认证公众号时才可用。"
 
 /** 手机端页面外壳：中文、移动端 viewport、深色模式友好、不引任何外部资源 */
 function page(title, body) {
@@ -227,12 +230,13 @@ function page(title, body) {
 export function mobileInstructions(loginType) {
   if (loginType === "WX") {
     return [
-      "1) 首选：点「分享到微信（推荐）」→ 分享面板选「微信」→「文件传输助手」→ 发送（不要再保存二维码图片扫码）",
-      "2) 备用：点「唤起微信」打开微信 App，再点「复制授权链接」，把链接粘贴到微信「文件传输助手」（或任意聊天）并发送",
-      "3) 在微信里点开这条链接，微信内置浏览器会直接跳转授权（网页授权，可能一闪而过；出现授权页就点「允许」）",
-      "4) 跳转后浏览器会停在一个 yybadaccess.3g.qq.com 的地址上",
-      "5) 页面可能空白：点微信右上角「…」→「复制链接」（或长按地址栏 → 全选 → 复制），把那条地址整条**粘贴到下面的 Code 输入框**提交",
-      "6) 若微信提示「该公众号没有这些scope的权限 / 错误码 10005」，说明网页授权走不通，改用本页最下面的扫码链接（需另一台设备或电脑打开）",
+      "1) 点「复制授权链接」，把这条链接拿到**另一台设备**上打开（电脑最方便；也可以「分享到微信」发到「文件传输助手」再在电脑上点开）",
+      "2) 电脑浏览器里这条链接会显示**二维码**（这是网站应用扫码登录页，正常现象）",
+      "3) 用这台手机的微信「扫一扫」扫电脑屏幕上的二维码 → 手机上点「确认登录」",
+      "4) 电脑浏览器会跳到一个 yybadaccess.3g.qq.com 的地址（地址栏带 code=…）",
+      "5) 把电脑地址栏那条地址整条复制，**粘贴到下面的 Code 输入框**提交（也可以发回手机再复制）",
+      "6) 不要保存二维码图片再扫：微信会提示「该二维码仅支持在扫一扫时通过摄像头识别」，一台手机自己扫自己屏幕走不通",
+      "7) 页面最下面的「公众号网页授权（实验）」链接对 Marvis 的 appid 无效，会报错误码 10005，别在那条上耗时间",
     ].join("\n")
   }
   return [
@@ -257,50 +261,46 @@ export function mobileInstructions(loginType) {
  * 用户连粘贴框都看不到（宿主的 method:"auto" 形态不渲染输入框）。
  * 现在两者都在同一个页面上，且 (1) 是首要动作。
  */
-export function formPage({ loginType, token, error, authorizeUrl: authUrl, qrAuthUrl = "" }) {
+export function formPage({ loginType, token, error, authorizeUrl: authUrl, webAuthUrl = "" }) {
   const isWx = loginType === "WX"
   const name = isWx ? "微信" : "QQ"
   const err = error ? `<p class="bad">${esc(error)}</p>` : ""
-  // QQ：mqqapi:// 唤起 App；微信：weixin:// 唤起微信本体，授权链接靠「复制 + 微信内打开」
-  const primaryHref = isWx ? wxAppLaunchUrl() : qqAppLaunchUrl(authUrl)
-  const primaryText = isWx ? `唤起微信 App 授权（${name}）` : `唤起手机 QQ 登录（${name}）`
-  // 微信的主按钮只唤起微信本体（weixin:// 不带 URL），所以点它时顺手把授权链接复制好，
-  // 用户在微信里直接粘贴；点完还得回来手动复制的流程太容易半途而废。
-  const primaryAttrs = isWx ? ` onclick="return copyAndGo()"` : ""
-  const primaryNote = isWx
-    ? `<p class="muted">点下面的按钮：唤起微信 + 同时把授权链接复制到剪贴板（到微信里直接粘贴）。</p>`
-    : ""
-  // 微信首选主按钮：Android 系统分享面板（navigator.share）直接把授权链接发进微信，
-  // 省掉「复制 → 切 App → 找聊天 → 粘贴」的手动步骤。127.0.0.1 是 secure context，
-  // Android Chrome 支持 navigator.share；不支持/分享失败时回退到复制 + 唤起（见 shareWx）。
-  // QQ 分支为空串（不带换行），保证 QQ 页输出一个字节都不变。
+  // QQ：mqqapi:// 直接唤起手机 QQ；微信 0.7.10 起不用 weixin://（唤起微信对扫码没帮助），
+  // 主按钮是「复制授权链接」——链接要拿到**电脑**上打开显示二维码。
+  const primaryHref = qqAppLaunchUrl(authUrl)
+  const primaryText = `唤起手机 QQ 登录（${name}）`
+  const primaryAttrs = ""
+  const primaryNote = ""
+  // 微信主按钮：复制授权链接（到电脑打开）。次按钮：分享到微信（可选，
+  // 电脑上装了微信时可以直接把链接发到电脑微信再点开）。
   const shareBtn = isWx
-    ? `<button type="button" onclick="return shareWx()" style="background:#07c160">分享到微信（推荐）</button>
+    ? `<button type="button" id="wx-copy-main" onclick="return copyWxMain()" style="background:#1677ff">复制授权链接（粘贴到电脑浏览器打开）</button>
+<button type="button" onclick="return shareWx()" style="background:#07c160">分享到微信（可选）</button>
 <p id="wx-share-status" class="muted"></p>
 `
     : ""
-  // 后续步骤块：初始就可见 —— 用户「唤起微信后不知道干嘛」正是要修的体验问题，
-  // 不能把步骤藏起来等点击。shareWx 成功/回退后只做滚动定位 + 高亮，不做显隐切换。
+  // 后续步骤块：初始就可见 —— 用户「拿到链接后不知道干嘛」正是要修的体验问题。
   const wxNextSteps = isWx
     ? `<div id="wx-next-steps" style="border:1px solid #d5d9de;border-radius:10px;padding:2px 14px 8px;margin:16px 0">
-<p class="lead"><strong>接下来怎么做（分享或唤起微信后，都按这里走）：</strong></p>
+<p class="lead"><strong>接下来怎么做（关键：二维码要在另一台设备上出现）：</strong></p>
 <ol>
-  <li>点「分享到微信（推荐）」→ 分享面板选「微信」→ 选「文件传输助手」→ 发送。（若用「唤起微信」：先点「复制授权链接」，到微信「文件传输助手」粘贴发送。）</li>
-  <li>在微信里点开刚发送的链接。</li>
-  <li>微信会直接跳转授权（网页授权，可能一闪而过；若出现授权页就点「允许」）。</li>
-  <li>跳转后页面可能空白：点微信右上角「…」→「复制链接」，回到 magpie 粘贴到 Code 输入框（或本页下方粘贴框）完成登录。</li>
+  <li>点「复制授权链接」，把链接拿到电脑浏览器粘贴打开（或点「分享到微信」发到「文件传输助手」，在电脑上点开）。</li>
+  <li>在<strong>电脑</strong>（或第二台手机/iPad）的浏览器里打开这条链接 —— 屏幕上会出现<strong>二维码</strong>。</li>
+  <li>用<strong>这台手机的微信「扫一扫」</strong>扫电脑屏幕 → 手机上点「确认登录」。</li>
+  <li>电脑浏览器会跳到 <code>yybadaccess…marvis_oauth?…code=…</code>：把那条地址整条复制，粘贴到下面输入框提交。</li>
 </ol>
-<p class="muted">提醒：不要保存二维码图片扫码（一台手机扫不了自己的码）。若微信提示 10005（没有这些 scope 权限），改用页面最下面的扫码链接，需要另一台设备。</p>
+<p class="muted">不要保存二维码图片再扫（微信已禁止：只支持摄像头识别）。只有一台手机时，这是唯一可行路径 —— 二维码必须显示在另一个屏幕上。</p>
 </div>`
     : ""
   const fallback = isWx
     ? `<p class="muted">${esc(WECHAT_OPEN_HINT)}</p>
-       <p class="muted">复制授权链接（唤起微信后，粘贴到微信「文件传输助手」点开）：</p>
+       <p class="muted">授权链接（复制到电脑浏览器打开，屏幕上会出现二维码）：</p>
        <input type="text" id="wx-auth-url" readonly value="${esc(authUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#fff;color:inherit;font:13px/1.4 ui-monospace,monospace">
-       <button type="button" id="wx-copy-btn" onclick="copyWxUrl()">复制授权链接</button>
-        <p class="muted">这条是微信「网页授权」链接，必须在微信里打开才会跳转授权；系统浏览器直接打开只会看到「请在微信客户端打开链接」。请用上面的「分享到微信」，或复制后粘贴到微信「文件传输助手」打开。</p>
-        ${qrAuthUrl ? `<p class="muted" style="margin-top:18px">万一微信提示「没有这些scope的权限 / 错误码 10005」或打不开，用这个扫码链接（需要另一台设备扫，或让电脑打开）：</p>
-        <input type="text" id="wx-qr-url" readonly value="${esc(qrAuthUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#fff;color:inherit;font:13px/1.4 ui-monospace,monospace">` : ""}`
+       <button type="button" id="wx-copy-btn" onclick="copyWxUrl()">复制这条链接</button>
+       <p class="muted">这条是<b>网站应用扫码登录</b>页：电脑打开显示二维码，手机微信扫它。系统浏览器直接打开也是二维码，属正常。</p>
+        ${webAuthUrl ? `<hr>
+        <p class="muted" style="margin-top:6px">实验：公众号网页授权（<b>对 Marvis 的 appid 无效</b>，会报错误码 10005；只有当这个 appid 是认证公众号时才有用）</p>
+        <input type="text" id="wx-web-url" readonly value="${esc(webAuthUrl)}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #d5d9de;background:#f0f1f3;color:#6b7280;font:13px/1.4 ui-monospace,monospace">` : ""}`
     : `<p class="muted">没装手机 QQ 时，用下面的按钮在浏览器里完成网页版登录：<br>
        <a class="alt" href="${esc(authUrl)}" target="_blank" rel="noreferrer">用浏览器打开 QQ 授权页</a></p>`
 
@@ -334,19 +334,29 @@ function flashCopy(){
 // authUrl 直接读 wx-auth-url 输入框的 value，不重新拼 URL（页面回显的就是本次授权地址）。
 // 分享失败（用户取消等）静默回退：copyWxUrl() 复制 + 文字提示；不支持 navigator.share
 // 时回退到 copyAndGo 那套（复制 + weixin:// 唤起）。两条路都指向下方后续步骤块。
+// 主按钮：复制授权链接（0.7.10 起微信主路径 —— 链接要拿到电脑上打开显示二维码）
+function copyWxMain(){
+  const el=document.getElementById('wx-auth-url');
+  if(!el) return false;
+  const done=()=>{setWxShareStatus('已复制 ✓ 现在到电脑浏览器粘贴打开，屏幕会出现二维码，用手机微信扫它。');showWxNextSteps()};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(el.value).then(done,()=>{fallbackCopy(el);done()});
+  }else{fallbackCopy(el);done()}
+  return false;
+}
+// 「分享到微信」次要路径：把链接发到电脑微信/文件传输助手，在电脑上点开同样是二维码页。
 function shareWx(){
   const el=document.getElementById('wx-auth-url');
   const authUrl=el?el.value:'';
   if(navigator.share){
-    navigator.share({title:'Marvis 微信授权',text:'在微信里点开这个链接，点「允许」完成授权',url:authUrl}).then(
-      ()=>{setWxShareStatus('已分享 ✓ 按下面「接下来怎么做」继续。');showWxNextSteps()},
-      ()=>{copyWxUrl();setWxShareStatus('分享未完成：已复制授权链接，请打开微信，粘贴到「文件传输助手」发送后点开。');showWxNextSteps()}
+    navigator.share({title:'Marvis 微信授权',text:'在电脑浏览器里打开这条链接，用手机微信扫屏幕上的二维码',url:authUrl}).then(
+      ()=>{setWxShareStatus('已分享 ✓ 在电脑上点开这条链接，然后按下面「接下来怎么做」。');showWxNextSteps()},
+      ()=>{copyWxUrl();setWxShareStatus('分享未完成：已复制授权链接，请到电脑浏览器打开。');showWxNextSteps()}
     );
   }else{
-    copyAndGo();
-    setWxShareStatus('此浏览器不支持系统分享：已复制授权链接并唤起微信，请粘贴到「文件传输助手」发送后点开。');
+    copyWxMain();
+    setWxShareStatus('此浏览器不支持系统分享：已复制授权链接，请到电脑浏览器打开。');
     showWxNextSteps();
-    window.location.href='weixin://';
   }
   return false;
 }
@@ -361,10 +371,10 @@ function showWxNextSteps(){
 </script>`
     : ""
 
-  // 第 1 步的说法必须与按钮真实行为一致：分享按钮只把链接发进微信，weixin:// 按钮只唤起
-  // 微信本体，授权都要在微信里点「允许」；说「点按钮完成授权」会让人以为点完就结束了。
+  // 第 1 步的说法必须与按钮真实行为一致：微信的主按钮只做「复制链接」，
+  // 真正的授权发生在电脑屏幕的二维码被手机扫到之后。
   const step1 = isWx
-    ? `第 1 步（推荐）：点「分享到微信（推荐）」，分享面板选微信 →「文件传输助手」发送。备用：点下面的按钮唤起微信，再「复制授权链接」发到微信里打开，点「允许」完成${esc(name)}授权。`
+    ? `第 1 步：点「复制授权链接」，把链接粘到<strong>电脑浏览器</strong>里打开 —— 屏幕上会出现二维码；再用这台手机的微信「扫一扫」扫它，手机上点「确认登录」。`
     : `第 1 步：点下面的按钮唤起手机 ${esc(name)} 完成授权（没装 App 就用下面的备用按钮走网页版）。`
 
   return page(
@@ -372,8 +382,8 @@ function showWxNextSteps(){
     `<h1>${esc(name)}登录</h1>
 ${err}
 <p class="lead">${step1}</p>
-${shareBtn}<a class="primary" href="${esc(primaryHref)}"${primaryAttrs}>${esc(primaryText)}</a>
-${primaryNote}
+${shareBtn}${isWx ? "" : `<a class="primary" href="${esc(primaryHref)}"${primaryAttrs}>${esc(primaryText)}</a>
+${primaryNote}`}
 ${fallback}
 ${wxNextSteps}
 <hr>
@@ -428,7 +438,7 @@ export async function startPasteServer({
   loginType = "QC",
   guid,
   authorizeUrl: authUrl = "",
-  qrAuthUrl = "",
+  webAuthUrl = "",
   port = DEFAULT_PASTE_PORT,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   signal,
@@ -464,7 +474,7 @@ export async function startPasteServer({
 
     if (url.pathname !== "/" && url.pathname !== "/submit") return send(404, page("404", "<h1>没有这个页面</h1>"))
 
-    if (req.method === "GET") return send(200, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl }))
+    if (req.method === "GET") return send(200, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl }))
 
     if (req.method !== "POST") return send(405, page("405", "<h1>不支持的方法</h1>"))
 
@@ -472,16 +482,16 @@ export async function startPasteServer({
     try {
       body = await readBody(req)
     } catch (err) {
-      return send(413, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: String(err?.message ?? err) }))
+      return send(413, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: String(err?.message ?? err) }))
     }
 
     // 表单是 application/x-www-form-urlencoded
     const form = new URLSearchParams(body)
     if (form.get("t") !== token) {
-      return send(403, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: "这个页面已经失效，请回 magpie 重新点一次登录。" }))
+      return send(403, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: "这个页面已经失效，请回 magpie 重新点一次登录。" }))
     }
     const pasted = String(form.get("callback") ?? "").trim()
-    if (!pasted) return send(400, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: "没有收到内容，请把地址栏那条地址粘贴进来。" }))
+    if (!pasted) return send(400, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: "没有收到内容，请把地址栏那条地址粘贴进来。" }))
     if (!extractCode(pasted)) {
       return send(
         400,
@@ -495,7 +505,7 @@ export async function startPasteServer({
 
     const state = stateOf(pasted)
     if (!state) {
-      return send(400, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: "粘贴的内容里没有 state，请重新复制地址栏那条完整地址。" }))
+      return send(400, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: "粘贴的内容里没有 state，请重新复制地址栏那条完整地址。" }))
     }
 
     try {
@@ -514,7 +524,7 @@ export async function startPasteServer({
     } catch (err) {
       // 换取失败（网络抖动 / code 已被消费）：允许用户在同一页面重试一次
       const msg = String(err?.message ?? err)
-      send(502, formPage({ loginType, token, qrAuthUrl, authorizeUrl: authUrl, error: msg.slice(0, 300) }))
+      send(502, formPage({ loginType, token, webAuthUrl, authorizeUrl: authUrl, error: msg.slice(0, 300) }))
     }
   })
 
@@ -632,19 +642,20 @@ export function mobileOauthLogin({
       // 每个账号一个独立 guid —— 与桌面路径同一套虚拟设备机制，避免新号顶掉旧号
       const { newDeviceGuid } = await import("./device.mjs")
       const guid = newDeviceGuid()
-      // ⚠ 微信手机端必须用「网页授权」（oauth2/authorize + snsapi_base + #wechat_redirect）：
-      //   在微信内置浏览器打开直接跳回带 code，一台手机全程完成。
-      //   旧的 qrconnect 是扫码页，手机上看到一张自己扫不了的二维码（用户实测卡死）。
-      //   scope 必须是 snsapi_base：snsapi_userinfo 真机实测报 10005（公众号未认证没该权限）。
-      //   QQ 仍用 graph.qq.com display=mobile（系统浏览器触发 mqqapi 唤起）。
-      //   state=guid 两条路都一样，回调 parseCallback 靠它认回设备，换取端不挑 scope。
-      const authUrl =
-        loginType === "WX" ? wxWebAuthUrl(guid) : authorizeUrl(loginType, guid, { mobile: true })
-      // 扫码备用：网页授权若被微信拒（10005 等），还有一条「另一台设备扫」的退路
-      const qrAuthUrl = loginType === "WX" ? wxQrLoginUrl(guid) : ""
+      // ⚠⚠ 0.7.10 方向纠正（真机两次实测）：Marvis 的 appid 是**网站应用**
+  //   （只有 snsapi_login 扫码权限），不是公众号。`oauth2/authorize` 不论
+  //   scope=snsapi_userinfo（0.7.8）还是 snsapi_base（0.7.9），在微信内一律 10005
+  //   「此公众号并没有这些scope的权限」——改 scope 解决不了，是 appid 类型问题。
+  //   所以 WX 主链接回到 `qrconnect`（网站应用扫码登录，HTTP 200 正常出二维码页），
+  //   二维码要在**另一台设备（电脑）**上显示，手机微信扫。
+  //   QQ 仍用 graph.qq.com display=mobile（系统浏览器触发 mqqapi 唤起）。
+  //   state=guid 两条路一样，回调 parseCallback 靠它认回设备。
+  const authUrl = authorizeUrl(loginType, guid, { mobile: true })
+  // 实验链接：公众号网页授权（对 Marvis 的 appid 无效，页面只作说明，不引导用户走）
+  const webAuthUrl = loginType === "WX" ? wxWebAuthUrl(guid) : ""
 
       // 本地登录页作为兜底（壳没给输入框时用户仍能走通）：必须在 authorize() 里就起来
-      const paste = await startServer({ loginType, guid, authorizeUrl: authUrl, qrAuthUrl, timeoutMs })
+      const paste = await startServer({ loginType, guid, authorizeUrl: authUrl, webAuthUrl, timeoutMs })
       try {
         onPage?.(paste.url)
       } catch {
@@ -658,9 +669,11 @@ export function mobileOauthLogin({
           ? [
               base,
               "",
-              `点「打开浏览器」打开的是**本机引导页**（不是扫码页）：上面有「唤起微信」按钮和「复制授权链接」。`,
-              `在微信里点「允许」后，把浏览器停在的那条 yybadaccess.3g.qq.com/…marvis_oauth?…code=… 地址整条复制，`,
-              `粘贴到下面的输入框提交（引导页上也有粘贴框，二选一即可）。`,
+              `点「打开浏览器」打开的是**本机引导页**：上面有「复制授权链接（粘贴到电脑浏览器打开）」和「分享到微信（可选）」。`,
+              `关键一步：这条链接要拿到**电脑**（或第二台设备）的浏览器里打开，屏幕上会出现二维码；`,
+              `用这台手机的微信「扫一扫」扫电脑屏幕 → 手机上点「确认登录」→ 电脑跳到 yybadaccess.3g.qq.com/…code=… ，`,
+              `把那条地址整条复制，粘贴到下面的输入框提交（引导页上也有粘贴框，二选一即可）。`,
+              `本机引导页地址：${paste.url}`,
             ].join("\n")
           : [
               base,

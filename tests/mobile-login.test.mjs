@@ -2,7 +2,7 @@
 //
 // 覆盖「手机点 QQ / 微信登录唤不起」的三个根因对应的修复：
 //   ① QQ 授权页在手机上必须是 display=mobile（否则渲染 PC 表单，不唤起 App）
-//   ② 微信是 PC 扫码页，instructions 与登录页必须教「唤起微信 App + 复制授权链接到微信里打开」
+//   ② 微信是网站应用扫码页：链接要拿到电脑上打开出二维码，手机微信扫（0.7.10）
 //      0.7.8 起手机端微信授权链接改用「网页授权」(oauth2/authorize + snsapi_base)：
 //      在微信内打开直接跳回带 code，一台手机完成；0.7.9 修 10005（userinfo→base）。
 //   ③ 壳的粘贴补丁按包名打，本插件包名不匹配 → 自带 127.0.0.1 表单页，不依赖壳
@@ -88,28 +88,30 @@ test("authorizeUrl：微信两条路都不加 display（qrconnect 没有这个�
   }
 })
 
-test("wxWebAuthUrl：微信网页授权走 oauth2/authorize + snsapi_base + #wechat_redirect（userinfo 会 10005）", () => {
+test("wxWebAuthUrl：公众号网页授权（oauth2/authorize + snsapi_base + #wechat_redirect）只是实验链接，对 Marvis appid 无效", () => {
   const u = new URL(wxWebAuthUrl("e".repeat(32)))
   assert.equal(u.host, "open.weixin.qq.com")
-  assert.equal(u.pathname, "/connect/oauth2/authorize", "必须是网页授权，不是 qrconnect")
-  assert.equal(u.searchParams.get("scope"), "snsapi_base", "必须 base：userinfo 真机报 10005（公众号未认证）")
+  assert.equal(u.pathname, "/connect/oauth2/authorize", "网页授权入口（不是 qrconnect）")
+  assert.equal(u.searchParams.get("scope"), "snsapi_base", "base 是最低权限；即便如此 Marvis 的网站应用 appid 仍报 10005")
   assert.equal(u.searchParams.get("response_type"), "code")
   assert.equal(u.searchParams.get("state"), "e".repeat(32), "state 原样回传 guid")
   assert.match(u.searchParams.get("redirect_uri"), /marvis_oauth\?login_type=WX$/, "回调仍带 login_type=WX")
   assert.ok(u.hash.endsWith("#wechat_redirect"), "必须有 #wechat_redirect（微信内跳转标记）")
 })
 
-test("wxQrLoginUrl：扫码备用仍是 qrconnect + snsapi_login（另一台设备扫）", () => {
+test("wxQrLoginUrl：网站应用扫码登录是主线路（qrconnect + snsapi_login）", () => {
   const u = new URL(wxQrLoginUrl("f".repeat(32)))
   assert.equal(u.pathname, "/connect/qrconnect")
   assert.equal(u.searchParams.get("scope"), "snsapi_login")
   assert.equal(u.searchParams.get("state"), "f".repeat(32))
 })
 
-test("mobileOauthLogin：微信 authorize 走网页授权链接（不是 qrconnect），放进本地页的授权框", async () => {
+test("mobileOauthLogin：微信主链接回 qrconnect（网站应用扫码），网页授权降为实验链接", async () => {
   let passedAuthUrl = ""
-  const server = async ({ authorizeUrl: authUrl }) => {
+  let passedWebAuthUrl = ""
+  const server = async ({ authorizeUrl: authUrl, webAuthUrl }) => {
     passedAuthUrl = authUrl
+    passedWebAuthUrl = webAuthUrl
     return {
       url: "http://127.0.0.1:4618/",
       wait: Promise.resolve({ openid: "X", accessToken: "T", loginType: "1" }),
@@ -118,23 +120,29 @@ test("mobileOauthLogin：微信 authorize 走网页授权链接（不是 qrconne
   }
   const m = mobileOauthLogin({ loginType: "WX", toAuth: (a) => a, startServer: server })
   const r = await m.authorize()
-  // 0.7.8：本地页里回显的授权链接必须是网页授权，微信内打开直接弹确认页
-  assert.match(passedAuthUrl, /open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "授权链接必须是网页授权")
-  assert.match(passedAuthUrl, /scope=snsapi_base/, "必须 base（userinfo 会 10005）")
-  assert.doesNotMatch(passedAuthUrl, /qrconnect/, "不许再用扫码页")
-  assert.match(passedAuthUrl, /#wechat_redirect$/, "必须带微信内跳转标记")
+  // 0.7.10：真机两次实测（userinfo / base 都 10005）证明 appid 是网站应用、只有 snsapi_login，
+  // 所以主链接必须是 qrconnect 扫码页 —— 二维码在电脑上显示、手机微信扫。
+  assert.match(passedAuthUrl, /open\.weixin\.qq\.com\/connect\/qrconnect/, "主链接必须是扫码页")
+  assert.match(passedAuthUrl, /scope=snsapi_login/)
+  assert.doesNotMatch(passedAuthUrl, /oauth2\/authorize/, "网页授权不能当主链接（10005）")
+  assert.match(passedWebAuthUrl, /oauth2\/authorize/, "实验链接仍传给页面（只作说明）")
+  assert.match(passedWebAuthUrl, /scope=snsapi_base/)
   // 壳打开的仍是本机引导页（拿按钮 + 粘贴框）
   assert.match(r.url, /^http:\/\/127\.0\.0\.1:\d+\//)
 })
 
 // ── instructions ───────────────────────────────────────────────────────
 
-test("mobileInstructions：微信教「唤起微信 App + 在微信里打开链接」，不再教保存二维码扫码", () => {
+test("mobileInstructions：微信教「复制链接 → 电脑打开出码 → 手机扫」，不再教保存二维码扫码", () => {
   const s = mobileInstructions("WX")
-  assert.match(s, /唤起微信/)
+  // 0.7.10：主路径是「复制链接 → 电脑打开出二维码 → 手机微信扫」，
+  // 不再教「唤起微信」（唤起微信后微信内只有一张扫不动的二维码）。
   assert.match(s, /复制授权链接/)
+  assert.match(s, /另一台设备/, "必须说清二维码要在另一块屏幕上出现")
+  assert.match(s, /扫一扫/, "手机这侧的动作是扫电脑屏幕")
   assert.match(s, /不要.*二维码/, "要明确说不要保存二维码图片扫码")
   assert.doesNotMatch(s, /识别图中二维码/, "手机上不再依赖长按识别二维码")
+  assert.doesNotMatch(s, /唤起微信/, "唤起微信已不是主路径")
 })
 
 test("mobileInstructions：QQ 说明会唤起 App 或走手机版网页", () => {
@@ -255,14 +263,15 @@ function fakeServer(url = "http://127.0.0.1:4618/") {
   })
 }
 
-test("mobileOauthLogin：微信 authorize 打开本机引导页（不是 qrconnect 扫码页），instructions 教唤起微信 App", async () => {
+test("mobileOauthLogin：微信 authorize 打开本机引导页，instructions 教「复制链接到电脑打开」", async () => {
   const m = mobileOauthLogin({ loginType: "WX", toAuth: (a) => a, startServer: fakeServer() })
   const r = await m.authorize()
   // ⚠ 0.7.6 修复：上一版 url=qrconnect → 壳「打开浏览器」直接开出一张二维码图片，
-  //   用户根本走不到「唤起微信 + 复制授权链接」那套按钮。现在 url 必须是本机引导页。
+  //   用户根本走不到本机引导页上的按钮。现在 url 必须是本机引导页。
   assert.match(r.url, /^http:\/\/127\.0\.0\.1:\d+\//, "微信必须打开本机引导页，不能直接开 qrconnect")
   assert.doesNotMatch(r.url, /open\.weixin\.qq\.com/, "壳打开的 url 里不许出现 qrconnect")
-  assert.match(r.instructions, /唤起微信/)
+  assert.match(r.instructions, /复制授权链接/)
+  assert.match(r.instructions, /电脑/)
   assert.match(r.instructions, /复制授权链接/)
   assert.doesNotMatch(r.instructions, /识别图中二维码/)
 })
@@ -566,42 +575,44 @@ test("本地登录页：同时提供「唤起 QQ 按钮」和「粘贴框」", a
   }
 })
 
-test("本地登录页：微信页给「唤起微信 + 复制授权链接」，不用假的 scheme", async () => {
+test("本地登录页：微信页给「复制授权链接（到电脑打开）」主按钮 + 扫码页链接 + 实验链接", async () => {
   const { startPasteServer } = await import("../src/marvis/mobile-login.mjs")
-  const authUrl = wxWebAuthUrl("8".repeat(32))
-  const qrAuthUrl = wxQrLoginUrl("8".repeat(32))
+  const authUrl = wxQrLoginUrl("8".repeat(32))
+  const webAuthUrl = wxWebAuthUrl("8".repeat(32))
   const s = await startPasteServer({
     loginType: "WX",
     guid: "8".repeat(32),
     authorizeUrl: authUrl,
-    qrAuthUrl,
+    webAuthUrl,
     port: 0,
     timeoutMs: 5000,
   })
   try {
     const html = await (await fetch(s.url)).text()
-    assert.match(html, /href="weixin:\/\//, "唤起微信必须是主按钮上的真链接（不是页面里随便一处字样）")
-    assert.match(html, /复制授权链接/, "微信页必须有复制授权链接按钮")
-    assert.match(html, /onclick="copyWxUrl\(\)"/, "复制按钮必须挂上脚本，不能只是文案")
-    assert.match(html, /function copyWxUrl\(/, "复制脚本本体必须在页面里")
+    // 0.7.10：微信主路径是「把扫码链接拿到电脑上打开」，不是唤起微信、也不是网页授权
+    assert.match(html, /id="wx-copy-main"/, "主按钮必须是复制授权链接（带去电脑打开）")
+    assert.match(html, /onclick="return copyWxMain\(\)"/, "主按钮要挂复制脚本")
+    assert.match(html, /function copyWxMain\(/, "copyWxMain 脚本本体必须在页面里")
+    assert.match(html, /复制授权链接（粘贴到电脑浏览器打开）/, "按钮文案必须说清链接去哪用")
+    assert.match(html, /onclick="return shareWx\(\)"/, "分享到微信保留为次按钮")
+    assert.match(html, /分享到微信（可选）/, "分享只是可选路径")
+    assert.doesNotMatch(html, /href="weixin:\/\//, "0.7.10 起微信页不再放 weixin:// 主链接（唤起微信对扫码没帮助）")
+    // 扫码链接本体
     assert.match(html, /<input[^>]*id="wx-auth-url"/, "必须有可复制的授权链接输入框本体")
     assert.match(html, /id="wx-copy-btn"/, "复制按钮要有稳定 id，别靠 DOM 位置猜")
     assert.match(html, /getElementById\('wx-copy-btn'\)/, "「已复制 ✓」的回写必须按 id 定位按钮")
-    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "输入框必须回显本次网页授权地址")
+    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect\?/, "输入框必须回显网站应用扫码登录地址")
     assert.match(html, /一台手机扫不了自己的码/, "必须明说不要走保存图片扫码那条链路")
-    assert.match(html, /必须在微信里打开/, "网页授权链接必须强调在微信内打开，系统浏览器只会看到提示页")
-    assert.doesNotMatch(html, /备用：用系统浏览器打开授权页/, "网页授权在系统浏览器打不开，不能再给这个兜底链接")
+    assert.match(html, /另一台设备/, "文案必须强调二维码要出现在另一台设备上")
+    assert.match(html, /10005/, "必须写明 10005 这个真实错误码")
+    // 实验链接：只作说明，灰底
+    assert.match(html, /id="wx-web-url"/, "实验链接仍要给出（公众号网页授权）")
+    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "实验链接是 oauth2/authorize")
+    assert.match(html, /对 Marvis 的 appid 无效/, "必须标清它对 Marvis 无效")
     assert.doesNotMatch(html, /mqqapi:\/\//, "微信页不该用 QQ 的 scheme")
     assert.doesNotMatch(html, /识别图中二维码/, "微信页不再教长按识别二维码")
-    assert.match(html, /点下面的按钮唤起微信/, "第 1 步文案必须与按钮真实行为一致（只唤起，不完成授权）")
     assert.doesNotMatch(html, /点下面的按钮完成微信授权/, "点一下不会完成授权，别写这种误导句")
-    assert.match(html, /onclick="return copyAndGo\(\)"/, "主按钮要点一次就同时复制链接，别让用户来回切 App")
-    assert.match(html, /function copyAndGo\(/, "copyAndGo 脚本本体必须在页面里")
-    assert.match(html, /同时把授权链接复制到剪贴板/, "要把「顺手复制」这件事写在按钮旁边")
     assert.match(html, /<textarea/, "同样要有粘贴框")
-    assert.match(html, /id="wx-qr-url"/, "必须给扫码备用链接（网页授权被拒时的退路）")
-    assert.match(html, /value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect\?/, "扫码链接必须是 qrconnect")
-    assert.match(html, /10005/, "必须写明 10005 这个真实错误码的应对")
   } finally {
     s.close()
   }

@@ -1,10 +1,12 @@
-// 微信「分享到微信」主路径 —— formPage 微信分支的离线测试
+// 微信登录引导页 —— 0.7.10 起主路径是「复制扫码链接 → 电脑上打开 → 手机微信扫」
 //
-// 背景：微信没有 QQ mqqapi://forward/url 那种「带 URL 唤起 App」的 scheme，
-// weixin:// 只能唤起微信本体，用户反馈「仅仅是调用了微信 就没有后续了」。
-// 修复：① navigator.share 系统分享面板直接把授权链接发进微信（首选主按钮）；
-//       ② 初始就可见的后续步骤块 wx-next-steps；③ 复制 + 唤起全套保留作回退。
-// QQ 分支一个字节都不许变（doesNotMatch shareWx / wx-next-steps）。
+// 历史：0.7.6 教「分享到微信 + 微信内打开」；0.7.8 改公众号网页授权（userinfo）；
+// 0.7.9 改 snsapi_base。三次都被真机打回：Marvis 的 appid 是网站应用（只有
+// snsapi_login），oauth2/authorize 在微信内一律 10005；qrconnect 只能出二维码页，
+// 而微信已禁止长按/相册识别二维码 —— 所以二维码必须显示在**另一块屏幕**（电脑）上。
+// 结论：微信没有 QQ mqqapi:// 那种带 URL 的 scheme，唯一可行链路就是
+//   复制链接 → 电脑浏览器打开出二维码 → 手机微信扫 → 电脑跳 code → 整条粘回来。
+// QQ 分支一个字节都不许变（doesNotMatch shareWx / wx-next-steps / 复制授权链接）。
 //
 // 跑法：node --test tests/wx-share.test.mjs
 
@@ -15,47 +17,56 @@ import { formPage, WECHAT_OPEN_HINT, mobileInstructions } from "../src/marvis/mo
 
 const TOKEN = "0".repeat(32)
 const WX_AUTH_URL =
+  "https://open.weixin.qq.com/connect/qrconnect?appid=wxTESTAPPID&redirect_uri=https%3A%2F%2Fyybadaccess.3g.qq.com%2Fmarvis_client_login%2Fmarvis_oauth%3Flogin_type%3DWX&response_type=code&scope=snsapi_login&state=" +
+  "8".repeat(32)
+const WX_WEB_URL =
   "https://open.weixin.qq.com/connect/oauth2/authorize?appid=wxTESTAPPID&redirect_uri=https%3A%2F%2Fyybadaccess.3g.qq.com%2Fmarvis_client_login%2Fmarvis_oauth%3Flogin_type%3DWX&response_type=code&scope=snsapi_base&state=" +
   "8".repeat(32) +
   "#wechat_redirect"
 const QQ_AUTH_URL = "https://graph.qq.com/oauth2.0/authorize?display=mobile&client_id=1903794758"
 
-const wxHtml = formPage({ loginType: "WX", token: TOKEN, authorizeUrl: WX_AUTH_URL })
+const wxHtml = formPage({ loginType: "WX", token: TOKEN, authorizeUrl: WX_AUTH_URL, webAuthUrl: WX_WEB_URL })
 const qqHtml = formPage({ loginType: "QC", token: TOKEN, authorizeUrl: QQ_AUTH_URL })
 
-// ── 微信页：分享主路径 ─────────────────────────────────────────────────
+// ── 微信页：主按钮是「复制授权链接」 ──────────────────────────────────
 
-test("微信页：有「分享到微信（推荐）」主按钮 + shareWx 脚本 + navigator.share", () => {
-  assert.match(wxHtml, /分享到微信/)
-  assert.match(wxHtml, /分享到微信（推荐）/)
-  assert.match(wxHtml, /onclick="return shareWx\(\)"/, "分享按钮必须挂上脚本，不能只是文案")
-  assert.match(wxHtml, /function shareWx\(/, "shareWx 脚本本体必须在页面里")
+test("微信页：主按钮是「复制授权链接（粘贴到电脑浏览器打开）」+ copyWxMain 脚本", () => {
+  assert.match(wxHtml, /id="wx-copy-main"/, "主按钮要有稳定 id")
+  assert.match(wxHtml, /复制授权链接（粘贴到电脑浏览器打开）/, "文案必须说清链接拿去电脑用")
+  assert.match(wxHtml, /onclick="return copyWxMain\(\)"/, "主按钮要挂复制脚本")
+  assert.match(wxHtml, /function copyWxMain\(/, "copyWxMain 脚本本体必须在页面里")
+  assert.match(wxHtml, /getElementById\('wx-auth-url'\)/, "复制的必须是页面上回显的那条链接")
+})
+
+test("微信页：不再放 weixin:// 主链接（唤起微信对扫码没帮助）", () => {
+  assert.doesNotMatch(wxHtml, /href="weixin:\/\//, "0.7.10 起微信页没有 weixin:// 主链接")
+  assert.doesNotMatch(wxHtml, /onclick="return copyAndGo\(\)"/, "唤起微信+顺手复制那套已不是主路径")
+  assert.doesNotMatch(wxHtml, /mqqapi:\/\//, "微信页不该用 QQ 的 scheme")
+})
+
+test("微信页：「分享到微信（可选）」保留为次按钮，shareWx 仍在", () => {
+  assert.match(wxHtml, /分享到微信（可选）/, "分享降为可选路径")
+  assert.match(wxHtml, /onclick="return shareWx\(\)"/)
+  assert.match(wxHtml, /function shareWx\(/)
   assert.match(wxHtml, /navigator\.share/)
 })
 
-test("微信页：分享按钮在唤起微信按钮之前（首选路径）", () => {
-  const shareAt = wxHtml.indexOf('return shareWx()')
-  const launchAt = wxHtml.indexOf('href="weixin://')
-  assert.ok(shareAt >= 0 && launchAt >= 0)
-  assert.ok(shareAt < launchAt, "「分享到微信」必须排在 weixin:// 唤起按钮之前/之上")
-})
-
-test("shareWx：authUrl 读 wx-auth-url 输入框，分享载荷带 title/text/url", () => {
+test("shareWx：载荷提示「在电脑浏览器打开、手机微信扫」", () => {
   const fn = /function shareWx\(\)\{[\s\S]*?\n\}/.exec(wxHtml)?.[0]
   assert.ok(fn, "必须能抠出 shareWx 函数本体")
   assert.match(fn, /getElementById\('wx-auth-url'\)/, "authUrl 必须从现有输入框读，不重新拼 URL")
   assert.match(fn, /navigator\.share\(\{/)
   assert.match(fn, /title:'Marvis 微信授权'/)
-  assert.match(fn, /点「允许」完成授权/)
+  assert.match(fn, /在电脑浏览器里打开这条链接/, "分享文案要说清接收方在电脑上打开")
   assert.match(fn, /url:authUrl/)
 })
 
-test("shareWx：失败回退 copyWxUrl，不支持分享时回退 copyAndGo + weixin://", () => {
+test("shareWx：失败回退复制，不支持分享时也回退复制（不再唤起微信）", () => {
   const fn = /function shareWx\(\)\{[\s\S]*?\n\}/.exec(wxHtml)?.[0]
   assert.ok(fn)
   assert.match(fn, /copyWxUrl\(\)/, "分享失败（用户取消等）要静默回退到复制")
-  assert.match(fn, /copyAndGo\(\)/, "navigator.share 不可用时要走复制+唤起那套")
-  assert.match(fn, /weixin:\/\//, "回退路径要真的唤起微信")
+  assert.match(fn, /copyWxMain\(\)/, "不支持分享时的回退也是复制")
+  assert.doesNotMatch(fn, /window\.location\.href='weixin:\/\//, "不再跳到 weixin://（微信内打开扫码页没用）")
   assert.match(wxHtml, /id="wx-share-status"/, "回退提示要有落点")
 })
 
@@ -69,95 +80,108 @@ test("微信页：wx-next-steps 初始就可见（不藏起来）", () => {
   assert.doesNotMatch(tag, /display:\s*none/, "步骤块不许初始隐藏")
 })
 
-test("微信页：步骤块是 4 步 ordered list，覆盖分享到登录全链路", () => {
+test("微信页：步骤块是 4 步，覆盖「电脑出码 → 手机扫 → 粘 code」全链路", () => {
   const block = /<div id="wx-next-steps"[\s\S]*?<\/div>/.exec(wxHtml)?.[0]
   assert.ok(block)
   assert.match(block, /<ol>/)
   assert.equal((block.match(/<li>/g) || []).length, 4, "必须是 4 步")
   for (const kw of [
-    "分享到微信",
-    "文件传输助手",
-    "跳转授权",
-    "允许",
-    "右上角",
-    "复制链接",
-    "Code 输入框",
-    "不要保存二维码图片扫码",
+    "复制授权链接",
+    "电脑",
+    "二维码",
+    "扫一扫",
+    "确认登录",
+    "yybadaccess",
+    "粘贴",
+    "另一台设备",
+    "不要保存二维码图片",
   ]) {
     assert.match(block, new RegExp(kw), `步骤块必须提到「${kw}」`)
   }
-  // 唤起微信那条回退路也要在步骤里说清楚
-  assert.match(block, /唤起微信/)
-  assert.match(block, /复制授权链接/)
 })
 
-// ── 微信页：既有回退一个不删 ───────────────────────────────────────────
+// ── 微信页：链接本体 + 实验链接 ────────────────────────────────────────
 
-test("微信页：weixin:// 唤起、copyWxUrl、copyAndGo、wx-copy-btn 全保留（系统浏览器兜底已移除）", () => {
-  assert.match(wxHtml, /href="weixin:\/\//)
-  assert.match(wxHtml, /onclick="return copyAndGo\(\)"/)
-  assert.match(wxHtml, /function copyAndGo\(/)
+test("微信页：主输入框回显扫码页（qrconnect），10005 应对写明", () => {
+  assert.match(
+    wxHtml,
+    /id="wx-auth-url"[^>]*value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect\?/,
+    "主授权框回显网站应用扫码登录地址",
+  )
+  assert.match(wxHtml, /scope=snsapi_login/, "扫码页 scope 必须是 snsapi_login")
+  assert.doesNotMatch(
+    wxHtml,
+    /id="wx-auth-url"[^>]*value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/,
+    "主授权框不许回显网页授权",
+  )
+  assert.match(wxHtml, /10005/, "必须写明 10005 这个真实错误码")
+})
+
+test("微信页：实验链接单独一栏、标注对 Marvis appid 无效、灰底", () => {
+  assert.match(wxHtml, /id="wx-web-url"/, "实验链接要有独立 id")
+  assert.match(wxHtml, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "实验链接是网页授权")
+  assert.match(wxHtml, /对 Marvis 的 appid 无效/, "必须标清无效")
+  const webBlock = /<input[^>]*id="wx-web-url"[^>]*>/.exec(wxHtml)?.[0]
+  assert.ok(webBlock)
+  assert.match(webBlock, /background:#f0f1f3/, "实验链接框要弱化成灰底")
+})
+
+test("微信页：复制/粘贴兜底全套仍在", () => {
   assert.match(wxHtml, /function copyWxUrl\(/)
-  assert.match(wxHtml, /onclick="copyWxUrl\(\)"/)
   assert.match(wxHtml, /id="wx-copy-btn"/)
-  assert.match(wxHtml, /<input[^>]*id="wx-auth-url"/)
-  assert.match(wxHtml, /必须在微信里打开/, "网页授权链接必须强调微信内打开")
-  assert.doesNotMatch(wxHtml, /备用：用系统浏览器打开授权页/, "网页授权在系统浏览器打不开，兜底链接已移除")
+  assert.match(wxHtml, /getElementById\('wx-copy-btn'\)/, "「已复制 ✓」回写按 id 定位")
   assert.match(wxHtml, /一台手机扫不了自己的码/)
-  assert.match(wxHtml, /点下面的按钮唤起微信/, "第 1 步备用文案必须与 weixin:// 按钮真实行为一致")
-  assert.match(wxHtml, /同时把授权链接复制到剪贴板/)
   assert.match(wxHtml, /<textarea/, "粘贴框仍在")
+  assert.match(wxHtml, /name="callback"/)
 })
 
-test("微信页：授权输入框回显网页授权地址（oauth2/authorize，不是扫码页）", () => {
-  assert.match(wxHtml, /value="https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/, "回显网页授权链接")
-  assert.match(wxHtml, /scope=snsapi_base/, "必须 base（userinfo 会 10005）")
-  assert.doesNotMatch(wxHtml, /id="wx-auth-url"[^>]*value="https:\/\/open\.weixin\.qq\.com\/connect\/qrconnect/, "主授权框不许回显扫码页")
-})
-
-test("微信页：带 error 重渲染时分享主路径与步骤块仍在（可重试）", () => {
-  const html = formPage({ loginType: "WX", token: TOKEN, error: "测试错误", authorizeUrl: WX_AUTH_URL })
+test("微信页：带 error 重渲染时主按钮与步骤块仍在（可重试）", () => {
+  const html = formPage({ loginType: "WX", token: TOKEN, error: "测试错误", authorizeUrl: WX_AUTH_URL, webAuthUrl: WX_WEB_URL })
   assert.match(html, /测试错误/)
-  assert.match(html, /分享到微信（推荐）/)
-  assert.match(html, /function shareWx\(/)
+  assert.match(html, /复制授权链接（粘贴到电脑浏览器打开）/)
+  assert.match(html, /function copyWxMain\(/)
   assert.match(html, /id="wx-next-steps"/)
 })
 
-// ── QQ 页：一个字节都不许沾微信分享 ───────────────────────────────────
+// ── QQ 页：一个字节都不许沾微信那套 ───────────────────────────────────
 
-test("QQ 页：不出现 shareWx / wx-next-steps / 分享到微信，mqqapi 唤起仍在", () => {
+test("QQ 页：不出现 shareWx / wx-next-steps / 复制授权链接，mqqapi 唤起仍在", () => {
   assert.doesNotMatch(qqHtml, /shareWx/)
   assert.doesNotMatch(qqHtml, /wx-next-steps/)
   assert.doesNotMatch(qqHtml, /分享到微信/)
   assert.doesNotMatch(qqHtml, /navigator\.share/)
+  assert.doesNotMatch(qqHtml, /复制授权链接/)
   assert.match(qqHtml, /mqqapi:\/\/forward\/url/, "QQ 仍走 mqqapi 唤起")
 })
 
 // ── 文案：WECHAT_OPEN_HINT / mobileInstructions ────────────────────────
 
-test("WECHAT_OPEN_HINT：分享列为首选，旧关键词（唤起微信/复制授权链接/不要二维码/允许）全保留", () => {
-  assert.match(WECHAT_OPEN_HINT, /分享到微信/)
-  assert.match(WECHAT_OPEN_HINT, /唤起微信/)
+test("WECHAT_OPEN_HINT：扫码要另一台设备、不要保存图片、10005 说明、实验链接无效", () => {
   assert.match(WECHAT_OPEN_HINT, /复制授权链接/)
+  assert.match(WECHAT_OPEN_HINT, /另一台设备/)
+  assert.match(WECHAT_OPEN_HINT, /二维码/)
   assert.match(WECHAT_OPEN_HINT, /不要.*二维码/)
   assert.match(WECHAT_OPEN_HINT, /一台手机扫不了自己的码/)
-  assert.match(WECHAT_OPEN_HINT, /跳转授权/, "base 静默授权：文案要说跳转，而不是弹确认页")
-  assert.match(WECHAT_OPEN_HINT, /10005/, "必须写明 10005 的应对")
-  // 首选必须是分享：分享要出现在「备用」之前
-  assert.ok(WECHAT_OPEN_HINT.indexOf("分享到微信") < WECHAT_OPEN_HINT.indexOf("备用"))
+  assert.match(WECHAT_OPEN_HINT, /10005/, "必须写明 10005")
+  assert.match(WECHAT_OPEN_HINT, /对 Marvis 的 appid 无效/, "必须点明实验链接无效")
+  assert.ok(
+    WECHAT_OPEN_HINT.indexOf("复制授权链接") < WECHAT_OPEN_HINT.indexOf("分享到微信"),
+    "主路径必须先是复制链接",
+  )
 })
 
-test("mobileInstructions(WX)：6 步结构，第 1 步是分享，旧关键词全保留", () => {
+test("mobileInstructions(WX)：7 步，第 1 步是复制链接、第 3 步是手机微信扫", () => {
   const s = mobileInstructions("WX")
   const lines = s.split("\n")
-  assert.equal(lines.length, 6, "现在是 6 步（新增 10005 应对）")
-  assert.match(lines[0], /分享到微信/, "首选路径放第 1 步")
-  assert.match(s, /唤起微信/)
-  assert.match(s, /复制授权链接/)
-  assert.match(s, /不要.*二维码/)
-  assert.match(s, /允许/)
-  assert.match(s, /地址栏/)
-  assert.match(s, /粘贴/)
+  assert.equal(lines.length, 7, "现在是 7 步")
+  assert.match(lines[0], /复制授权链接/, "首选路径放第 1 步")
+  assert.match(lines[0], /另一台设备/)
+  assert.match(lines[1], /二维码/)
+  assert.match(lines[2], /扫一扫/)
+  assert.match(lines[3], /code=/)
+  assert.match(lines[4], /粘贴/)
+  assert.match(lines[5], /不要保存二维码图片/)
+  assert.match(lines[6], /10005/)
   assert.doesNotMatch(s, /识别图中二维码/)
 })
 

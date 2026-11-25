@@ -1,5 +1,25 @@
 # 更新记录
 
+## 0.7.10 — 2026-11-25
+
+- **微信登录方向纠正（真机两次打回后的结论）**：Marvis 的 appid 是**网站应用**，只有
+  `snsapi_login`（`qrconnect` 扫码）；它**不是公众号**，所以 `connect/oauth2/authorize`
+  （0.7.8 的 snsapi_userinfo、0.7.9 的 snsapi_base）在微信内一律报
+  **「此公众号并没有这些scope的权限，错误码:10005」**。改 scope 解决不了，是 appid 类型问题。
+  微信又已禁止长按/相册识别二维码（「该二维码仅支持在扫一扫时通过摄像头来识别」），
+  一台手机扫自己屏幕走不通。于是手机端主路径改为：
+  **复制授权链接 → 到电脑（或第二台设备）浏览器打开出二维码 → 这台手机微信「扫一扫」→
+  电脑跳到 `yybadaccess…code=…` → 整条粘回来**。
+- 微信引导页：主按钮换成「复制授权链接（粘贴到电脑浏览器打开）」+ `copyWxMain()`；
+  「分享到微信」降为可选次按钮；不再放 `weixin://` 主链接（唤起微信对扫码没帮助）。
+  文案与 `mobileInstructions("WX")`（7 步）、`WECHAT_OPEN_HINT` 全部改为「二维码必须在另一块屏幕上」，
+  并明确写出 10005 是 appid 类型问题、页面下方「公众号网页授权（实验）」对 Marvis 无效。
+- **新增 `scripts/import-login.mjs`**（`node scripts/cli.mjs import-login <文件.json> --yes`）：
+  把电脑端导出的一份 `{"marvis#xxxx": {...}}` 登录态合并进本机 `plugin-auth.json` ——
+  手机扫码这条路走不通时，直接把电脑已登录的账号搬过去。带备份、原子写、`--dry-run`、
+  `--overwrite`、`--json`，只合并 `marvis#` / `marvis-proxy` 前缀（不碰别的插件的凭据），
+  目标文件不存在时自动建。测试 `tests/import-login.test.mjs` 13 例。
+- 测试：`mobile-login`+`wx-share` 54 例、新增 `import-login` 13 例全过。
 ## 0.7.9 — 2026-11-25
 
 - **修 0.7.8 的真机报错：微信网页授权 scope 改 `snsapi_base`**。0.7.8 把手机微信登录从
