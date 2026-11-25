@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.8.3 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.8.4 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·

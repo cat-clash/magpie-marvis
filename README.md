@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.8.3）
+# 腾讯 Marvis · magpie 供应商插件（0.8.4）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >

@@ -1,5 +1,17 @@
 # 更新记录
 
+## 0.8.4 — 2026-11-26
+
+**并发安全、会话防刷屏与指纹可靠性：三项高优先级 + 会话复用 + 六项中优先级优化**
+
+- **修复（自动 WS 回退的全局 env 竞态）**：4100404 自动切 relay 不再写 `process.env.MARVIS_WS_MODE`，改为 `mode:"relay"` 单次请求参数透传（`cfg(modeOverride)`），消除 await 窗口期并发请求被串味。
+- **修复（403 自愈链绕过节奏闸）**：兜底句 / 4 句候选池 / U+2060 护栏三处重试全部走 `pacedRetryUpstream`，纳入账号节奏闸；`MARVIS_RETRY_PACING=0` 可关。
+- **修复（会话刷屏）**：一次宿主逻辑请求（含所有 403 重试与自动 WS 回退）只生成一条 `conv_*`，贯穿 `gatewayChatStream`；`MARVIS_GATEWAY_CONVERSATION_ID` 可把全部插件流量钉在一条会话。
+- **修复（Beacon 版本写死）**：`appVersion()` 自动从客户端日志 `client_platform_version` / 安装目录探测（本机 1.60.3600.59），`MARVIS_APP_VERSION` 仍最高优先；诊断新增 `appVersion` / `appVersionSource`。
+- **首行自愈记忆**：`(账号桶, 原首行 hash) → 成功改写句`，TTL 24h，被拦即失效，命中后省掉整条重试链。
+- **指纹可靠性**：`reloadFingerprint()` + `nativeMtimeMs()` 供 CLI/doctor 检测客户端升级；qimei36 先扫已知 `qimei_debug_*.log` 快路径，命中跳过全盘递归；`MARVIS_USKEY_TIMEOUT_MS` 可配（默认 5s）；`externalQimeiByAccount` 按账号缓存，修掉多账号互相覆盖。
+- **诊断健壮性**：`riskEvents` 最近 20 条随 `breaker-state.json` 落盘（重启可恢复）；pacing `axes` Map 超 128 条时回收 1h 前的过期 key。
+
 ## 0.8.3 — 2026-11-25
 
 **风控文案扣留：WS 通道的拦截文案不再伪装成正文；`risk_control_blocked` 与 HTTP 4100404 同口径回 429**
