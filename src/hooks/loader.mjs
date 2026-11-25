@@ -9,7 +9,7 @@
 // ⚠ 实测：把 UAL 签名头（md5 body+ts+accessKey+nonce）加到模型网关上是**错的** ——
 //   会从 403 风控变成 401 登录态过期。那套只用于 /v3/*。
 
-import { randomUUID } from "node:crypto"
+import { randomUUID, createHash } from "node:crypto"
 import { BASE_V1, DEFAULT_MODEL, DISPLAY_BY_SLOT, PROVIDER, canonicalModelId, isUnavailableModel, FIRST_LINE_OPTION_KEY, OFFICIAL_FIRST_LINE } from "../context.mjs"
 import { llmHeaders } from "../marvis/protocol.mjs"
 import { directFetch, directPost, directTransport } from "../marvis/directnet.mjs"
@@ -33,6 +33,40 @@ import {
   enhanceRiskMessage,
 } from "../marvis/failure-hints.mjs"
 import { isMobile } from "../marvis/mobile-login.mjs"
+
+/**
+ * 首行自愈成功记忆：(账号桶, 原首行 hash) → 上次成功放行的改写句。
+ * 用户的 system 首行和账号基本固定，命中后直接用记忆句发第一发，省掉整条重试链。
+ * 每次失败会删掉对应条目（上游黑名单会变，记忆不能是永久的）；TTL 默认 24h。
+ */
+const FIRST_LINE_MEMORY_TTL_MS = 24 * 60 * 60 * 1000
+const firstLineMemory = new Map() // key = `${acctBucket}:${hash}` → { text, at }
+
+function firstLineMemoryKey(bucket, originalLine) {
+  const hash = createHash("sha256").update(String(originalLine || "")).digest("hex").slice(0, 16)
+  return `${bucket}:${hash}`
+}
+
+function rememberedFirstLine(bucket, originalLine, mode) {
+  if (mode === "off") return ""
+  const key = firstLineMemoryKey(bucket, originalLine)
+  const entry = firstLineMemory.get(key)
+  if (!entry) return ""
+  if (Date.now() - entry.at > FIRST_LINE_MEMORY_TTL_MS) {
+    firstLineMemory.delete(key)
+    return ""
+  }
+  return entry.text
+}
+
+function rememberFirstLine(bucket, originalLine, text, mode) {
+  if (!text || mode === "off") return
+  firstLineMemory.set(firstLineMemoryKey(bucket, originalLine), { text, at: Date.now() })
+}
+
+function forgetFirstLine(bucket, originalLine) {
+  firstLineMemory.delete(firstLineMemoryKey(bucket, originalLine))
+}
 
 /**
  * 上游说「模型不行」的信号 —— 只收**模型级**的，映射成 404（搁置这个模型，不打死账号）。
@@ -677,7 +711,11 @@ export function loaderHook(input, options = {}) {
           if (next === json) return null // 三处都找不到 system 文本，无从下手
           try {
             const retry = await pacedRetryUpstream(JSON.stringify(next))
-            return retry.ok ? normalizeStreaming(retry) : null
+            if (retry.ok) {
+              rememberFirstLine(acctBucket, systemFirstLine, firstLine.text, firstLine.mode)
+              return normalizeStreaming(retry)
+            }
+            return null
           } catch {
             return null
           }
@@ -725,7 +763,10 @@ export function loaderHook(input, options = {}) {
             } catch {
               return null
             }
-            if (retry.ok) return normalizeStreaming(retry)
+            if (retry.ok) {
+              rememberFirstLine(acctBucket, systemFirstLine, cand, firstLine.mode)
+              return normalizeStreaming(retry)
+            }
             const errText = await retry.clone().text().catch(() => "")
             // 错误类型变了就停：401/风控/404 等其他故障 ≠ 内容过滤，立即中止
             if (!(retry.status === 403 && /非法请求|permission_error|4100406/i.test(errText))) return null
@@ -742,7 +783,13 @@ export function loaderHook(input, options = {}) {
           if (next === json) return null // 护栏没开，或改写没有命中任何内容
           try {
             const retry = await pacedRetryUpstream(JSON.stringify(next))
-            return retry.ok ? normalizeStreaming(retry) : null
+            if (retry.ok) {
+              // 护栏改写后的首行：从 next 里取，供下次直接命中
+              const guardedLine = firstLineInBody(next)
+              rememberFirstLine(acctBucket, systemFirstLine, guardedLine, firstLine.mode)
+              return normalizeStreaming(retry)
+            }
+            return null
           } catch {
             return null
           }
@@ -808,6 +855,17 @@ export function loaderHook(input, options = {}) {
                 if (forced !== json) {
                   json = forced
                   changed = true
+                }
+              } else {
+                // 首行自愈记忆：同一账号 + 同一原首行上次被拦后换某句成功过，直接命中，
+                // 省掉「兜底句 → 4 句候选 → 护栏」整条重试链。
+                const remembered = rememberedFirstLine(acctBucket, systemFirstLine, firstLine.mode)
+                if (remembered && remembered !== systemFirstLine) {
+                  const forced = withFirstLineInBody(json, remembered)
+                  if (forced !== json) {
+                    json = forced
+                    changed = true
+                  }
                 }
               }
             }
@@ -1044,6 +1102,8 @@ export function loaderHook(input, options = {}) {
         //   而 403 + 这个组合目前只出现在内容过滤上（模型无权限是 400「无效模型id」）。
         //   宁可多给一句「进群」，也不要把人甩回宿主那句「API 密钥无效」。
         if (response.status === 403 && /非法请求|permission_error|4100406/i.test(text)) {
+          // 记忆句失效：同一账号+原首行的缓存条目删掉，本轮重新走完整自愈链找新句
+          forgetFirstLine(acctBucket, systemFirstLine)
           // 自愈链（0.5.2）：门禁放宽为 mode !== "off" —— always 模式下用户自己那句
           // 被拦后同样参与自愈（0.5.1 及以前 always 模式没有任何兜底）。
           // 顺序：用户兜底句 → 候选池随机换句（≤4）→ U+2060 护栏（可选）→ 统一诊断。

@@ -157,7 +157,8 @@ let beaconTried = false
 let beaconError = ""
 let commonKey = ""
 let qimeiCache = ""
-let externalQimei = ""
+/** 外部出票返回的 qimei36，按账号缓存（旧版是进程级单例，多账号互相覆盖） */
+const externalQimeiByAccount = new Map()
 /** detectQimeiFromClient 的进程级缓存：扫过一次（哪怕没找到）就不再扫 */
 let clientScanDone = false
 let clientScanHit = ""
@@ -167,6 +168,46 @@ let androidError = ""
 let warnedAndroid = false
 let warnedRandom = false
 let warnedNative = false
+
+/** 账号 key：优先 login_openid，其次 guid，都没有落 "*" 桶 */
+function accountKeyOfCommon(common = {}) {
+  return String(common?.login_openid ?? common?.guid ?? "").trim() || "*"
+}
+
+/**
+ * 重置指纹缓存（客户端升级 DLL / 首次扫描时日志还没生成 qimei36 时用）。
+ * 不改 process.env：MARVIS_APP_VERSION 等仍即时生效；这里只重置进程级探测结果，
+ * 下次 uskeyOf / qimei36 调用会重新加载 native 与扫描日志。供 CLI / doctor 调用。
+ */
+export function reloadFingerprint() {
+  beacon = null
+  beaconTried = false
+  beaconError = ""
+  commonKey = ""
+  qimeiCache = ""
+  externalQimeiByAccount.clear()
+  clientScanDone = false
+  clientScanHit = ""
+  androidLib = null
+  androidCtx = 0
+  androidError = ""
+  warnedAndroid = false
+  warnedRandom = false
+  warnedNative = false
+  detectedAppVersion = ""
+  appVersionScanned = false
+}
+
+/** native 目录 mtime（诊断用：升级 DLL 后与上次记录对比，提示 reloadFingerprint） */
+export function nativeMtimeMs() {
+  try {
+    return Math.max(...REQUIRED.map((f) => {
+      try { return statSync(join(NATIVE_DIR, f)).mtimeMs } catch { return 0 }
+    }))
+  } catch {
+    return 0
+  }
+}
 
 function warnOnce(msg) {
   if (warnedNative) return
@@ -261,15 +302,17 @@ function uskeyUrl() {
  *
  * @param {{ guid?: string, login_openid?: string, login_type?: string }} common
  * @param {string} busInfo
- * @param {AbortSignal} [signal] 调用方的取消信号（可选，与下面的 5s 硬超时合并）
+ * @param {AbortSignal} [signal] 调用方的取消信号（可选，与超时合并）
  * @returns {Promise<string>}
  */
 async function externalUskey(common, busInfo, signal) {
   const url = uskeyUrl()
   if (!url) return ""
-  // 出票服务挂起不能拖死整条请求链 —— 5s 硬超时；调用方给了 signal 时用
-  // AbortSignal.any 合并（Node 24 / Bun ≥1.1 都有），超时到了照样走 catch 返回 ""
-  const deadline = AbortSignal.timeout(5000)
+  // 出票服务挂起不能拖死整条请求链；默认 5s，由 MARVIS_USKEY_TIMEOUT_MS 覆盖。
+  // 调用方给了 signal 时用 AbortSignal.any 合并（Node 24 / Bun ≥1.1 都有）。
+  const timeoutRaw = Number.parseInt(String(process.env.MARVIS_USKEY_TIMEOUT_MS ?? ""), 10)
+  const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 5000
+  const deadline = AbortSignal.timeout(timeoutMs)
   const merged =
     signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, deadline]) : deadline
   try {
@@ -284,7 +327,7 @@ async function externalUskey(common, busInfo, signal) {
     try {
       const json = JSON.parse(text)
       const q = String(json?.qimei36 || json?.data?.qimei36 || "").trim()
-      if (q) externalQimei = q
+      if (q) externalQimeiByAccount.set(accountKeyOfCommon(common), q)
       return String(json?.uskey || json?.data?.uskey || "").trim()
     } catch {
       return text.trim()
@@ -299,8 +342,45 @@ const CLIENT_FILE_RX = /(\.log$|\.txt$|\.ldb$|\.sst$|\.json$|manifest|current)/i
 const SKIP_DIR_RX = /(node_modules|Cache|GPUCache|Code Cache|Crashpad)/i
 const MAX_SCAN_FILE = 8 * 1024 * 1024
 
+/**
+ * 快路径：只读客户端日志目录里已知的 qimei_debug_*.log / Marvis*.log。
+ * 本机日志目录里确实有 qimei36 真值，命中后不必做深度 5 的全盘递归扫描。
+ */
+function detectQimeiFromKnownLogs() {
+  const dirs = [
+    process.env.MARVIS_LOG_DIR,
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Temp", "Tencent", "Marvis", "logs"),
+    process.env.APPDATA && join(process.env.APPDATA, "Tencent", "Marvis", "logs"),
+    "/tmp/Tencent/Marvis/logs",
+  ].filter(Boolean)
+  for (const dir of dirs) {
+    let files = []
+    try {
+      files = readdirSync(dir)
+        .filter((f) => /^(qimei_debug_.*|Marvis.*)\.log$/i.test(f))
+        .map((f) => join(dir, f))
+        .slice(0, 8)
+    } catch {
+      continue
+    }
+    for (const p of files) {
+      try {
+        if (statSync(p).size > MAX_SCAN_FILE) continue
+        const m = QIMEI_RX.exec(readFileSync(p, "utf8"))
+        if (m) return m[1]
+      } catch {
+        /* 单文件读不了就跳过 */
+      }
+    }
+  }
+  return ""
+}
+
 /** 从 Marvis 客户端数据目录里找 qimei36（Windows 安装后通常已经有真值） */
 function detectQimeiFromClient() {
+  const fast = detectQimeiFromKnownLogs()
+  if (fast) return fast
+
   const roots = [process.env.APPDATA, process.env.LOCALAPPDATA, process.env.TEMP]
     .filter(Boolean)
     .map((base) => join(String(base), "Tencent", "Marvis"))
@@ -353,7 +433,9 @@ function detectQimeiFromClient() {
  */
 export function qimei36(common = {}) {
   if (qimeiCache) return qimeiCache
-  if (externalQimei) return externalQimei
+  const acctKey = accountKeyOfCommon(common)
+  const cachedExternal = externalQimeiByAccount.get(acctKey)
+  if (cachedExternal) return cachedExternal
 
   const env = String(process.env.MARVIS_QIMEI36 || "").trim()
   if (env) {
@@ -549,6 +631,11 @@ export function fingerprintStatus() {
   return {
     native,
     nativeDir: NATIVE_DIR,
+    nativeMtimeMs: nativeMtimeMs(),
+    uskeyTimeoutMs: (() => {
+      const n = Number.parseInt(String(process.env.MARVIS_USKEY_TIMEOUT_MS ?? ""), 10)
+      return Number.isFinite(n) && n > 0 ? n : 5000
+    })(),
     appVersion: appVersion(),
     appVersionSource: String(process.env.MARVIS_APP_VERSION ?? "").trim()
       ? "env"

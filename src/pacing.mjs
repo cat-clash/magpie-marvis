@@ -59,6 +59,16 @@ export function createPacing({
 
   // 每个 key 一条时间轴：key = 账号桶；global 作用域下只有 "*" 一条
   const axes = new Map() // key → lastDispatchAt（计划值，含 jitter）
+  // axes 无上限累积：长期挂机几百个账号会留下几百条过期时间轴。
+  // 超过阈值时做一次过期回收（TTL 默认 1h），只删明显过期的 key，不影响活跃账号。
+  const AXES_SOFT_LIMIT = 128
+  const AXES_TTL_MS = 60 * 60 * 1000
+  function pruneAxes(t) {
+    if (axes.size <= AXES_SOFT_LIMIT) return
+    for (const [key, last] of axes) {
+      if (t - Number(last) > AXES_TTL_MS) axes.delete(key)
+    }
+  }
 
   /**
    * 出网前 await：距**该 key 上次放行**不足 minMs 时等到槽位（剩余时间），
@@ -68,8 +78,9 @@ export function createPacing({
    */
   async function pacingWait(key) {
     const k = scope === "global" ? GLOBAL_KEY : String(key ?? "") || GLOBAL_KEY
-    const lastDispatchAt = axes.get(k) ?? null
     const t = now()
+    pruneAxes(t)
+    const lastDispatchAt = axes.get(k) ?? null
     const remaining =
       minMs > 0 && lastDispatchAt !== null ? Math.max(0, lastDispatchAt + minMs - t) : 0
     const jitter = jitterMs > 0 ? random() * jitterMs : 0

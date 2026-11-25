@@ -60,6 +60,7 @@ const DEFAULT_COOLDOWN_MS = 1_800_000
 const MAX_COOLDOWN_MS = 8 * 60 * 60 * 1_000 // 指数退避上限 8h
 const CLOCK_SKEW_MS = 5 * 60 * 1_000 // openedAt 领先当前时刻超过 5 分钟 = 时钟偏移
 const MAX_EVENTS = 50 // 风险事件环形缓冲上限
+const MAX_PERSIST_EVENTS = 20 // 落盘保留的最近事件条数（重启后仍可诊断断续风控）
 const JITTER_RATIO = 0.1 // 每次熔断的 ±10% jitter
 
 function intEnv(name, fallback, { allowZero = false } = {}) {
@@ -264,6 +265,11 @@ export function createBreaker({
       failures = clampInt(data.failures)
       // v1 迁移 / stale 残留：只继承上面两个诊断计数，活跃冷却丢弃（见 readState 注释）
       if (data.v1 || data.stale) return
+      // 恢复落盘事件（最近 20 条），保持内存上限
+      if (Array.isArray(data.events)) {
+        events.push(...data.events.slice(-MAX_PERSIST_EVENTS).filter((e) => e && typeof e === "object"))
+        while (events.length > MAX_EVENTS) events.shift()
+      }
       tripReason = typeof data.reason === "string" ? data.reason : ""
       const opened = Number(data.openedAt)
       if (Number.isFinite(opened) && opened > 0) {
@@ -291,6 +297,8 @@ export function createBreaker({
     // 开闸来源标记：只有 trip()（共因闸）产生的全局冷却带 reason。
     // readState() 对全局桶无 reason 的残留做自愈（见 0.8.1 注释），所以必须在这里落盘。
     if (tripReason) entry.reason = tripReason
+    // 最近 20 条事件随状态落盘，重启后仍能诊断断续风控
+    if (events.length) entry.events = events.slice(-MAX_PERSIST_EVENTS)
     all[bucket] = entry
     writeState(all)
   }
