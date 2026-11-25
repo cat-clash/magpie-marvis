@@ -12,7 +12,7 @@
 import { BASE_V1, DEFAULT_MODEL, DISPLAY_BY_SLOT, PROVIDER, canonicalModelId, isUnavailableModel, FIRST_LINE_OPTION_KEY, OFFICIAL_FIRST_LINE } from "../context.mjs"
 import { llmHeaders } from "../marvis/protocol.mjs"
 import { directFetch, directPost, directTransport } from "../marvis/directnet.mjs"
-import { riskBreaker } from "../breaker.mjs"
+import { getBreaker, accountKeyOf, accountLabelOf, riskScope } from "../breaker.mjs"
 import { pacingWait } from "../pacing.mjs"
 import {
   openclawEnabled,
@@ -473,6 +473,14 @@ export function loaderHook(input, options = {}) {
 
     const auth = await getAuth()
     const creds = credsOf(auth)
+    // ── 按账号分桶的风控闸（0.8.0）───────────────────────────────────────
+    // magpie 壳每次请求只传**当前选中的那一个账号**，插件侧没有账号池，所以「谁在冷却」
+    // 只能从这份凭据算：bucket = sha256(openid/uid) 前 12 位（不落明文），
+    // label = 脱敏账号名（首 4 + 尾 4），只用于报错文案与 CLI 列表。
+    // MARVIS_RISK_SCOPE=global 时退回旧行为（所有账号共用 `"*"` 桶）。
+    const acctBucket = riskScope() === "global" ? "*" : accountKeyOf(creds)
+    const acctLabel = accountLabelOf(creds)
+    const breaker = getBreaker(acctBucket, acctLabel)
     if (!viaGateway && (!creds.accessToken || !creds.openid)) {
       // 被 `accounts logout` 取消登录的账号：给壳明确的「需要重新登录」信号，
       // 不要静默 return {}（那看起来像插件坏了）。
@@ -787,14 +795,17 @@ export function loaderHook(input, options = {}) {
         // 风控熔断中（HTTP 直连路径）：本地 429，请求不出网 ——
         // 让账号自然冷却，而不是陪着宿主的默认重试策略把冷却时间撞得更长（issue #71）。
         // WS（remote/relay）走的是手机会话域，另一个风控域，不受此熔断约束。
-        if (!openclawEnabled() && riskBreaker.open) {
+        // 0.8.0 起熔断按账号分桶：这里只挡**当前这个账号**，其他账号照常出网。
+        if (!openclawEnabled() && breaker.open) {
           return riskResponse(
             "risk_cooldown",
-            `Marvis 账号风控冷却中：连续 ${riskBreaker.failures} 次被 4100404 拦截，` +
-              `插件已暂停出网 ${Math.ceil(riskBreaker.retryAfterMs / 60_000)} 分钟` +
-              "（换账号没用、换 IP/UA 也无效；等待或改走 MARVIS_WS_MODE=remote）。" +
-              "设 MARVIS_RISK_COOLDOWN_MS=0 可禁用熔断。",
-            riskBreaker.retryAfterMs / 1000,
+            `账号「${acctLabel}」风控冷却中：连续 ${breaker.failures} 次被 4100404 拦截，` +
+              `插件已暂停这个账号出网 ${Math.ceil(breaker.retryAfterMs / 60_000)} 分钟` +
+              "（**其他账号不受影响**；换 IP/UA 无效，等冷却结束，或给这个账号设 " +
+              "MARVIS_WS_MODE=remote 改走 WS 通道）。" +
+              "MARVIS_RISK_COOLDOWN_MS=0 可禁用熔断；MARVIS_RISK_SCOPE=global 可退回全局冷却；" +
+              "node scripts/cli.mjs breaker reset <账号> 可立刻解封。",
+            breaker.retryAfterMs / 1000,
           )
         }
 
@@ -806,7 +817,7 @@ export function loaderHook(input, options = {}) {
           // 走它时不该被 HTTP 侧的节奏拖慢。
           // 首帧前的这一次等待是本路径唯一的节流点；SSE 生产循环里不再插入等待
           // （那里的抖动只会让流看起来卡顿，对节奏风控无意义）。
-          if (!openclawEnabled()) await pacingWait()
+          if (!openclawEnabled()) await pacingWait(acctBucket)
           response = await callUpstream(body)
         } catch (err) {
           if (err instanceof HeaderUnavailable) {
@@ -839,7 +850,7 @@ export function loaderHook(input, options = {}) {
 
         if (response.ok) {
           // 成功即证明账号健康：清零熔断计数
-          riskBreaker.record(true)
+          breaker.record(true)
           return normalizeStreaming(response)
         }
 
@@ -897,15 +908,17 @@ export function loaderHook(input, options = {}) {
           //   冷却时间越撞越长（issue #71 实测）。429 让宿主按 retry-after 退避；
           //   连续 MARVIS_RISK_THRESHOLD（默认 5）次后熔断，请求根本不出网。
           //   旧行为可用 MARVIS_RISK_STATUS=503 找回。
-          riskBreaker.record(false)
-          const retryAfterSec = Math.max(1, Math.ceil(riskBreaker.retryAfterMs / 1000) || 60)
+          breaker.record(false)
+          const retryAfterSec = Math.max(1, Math.ceil(breaker.retryAfterMs / 1000) || 60)
           const status = Number.parseInt(String(process.env.MARVIS_RISK_STATUS ?? ""), 10) || 429
           const mobile = isMobile()
           const baseMessage =
             "上游风控拦截：Marvis 的 /v1/chat/completions 会校验 Ual-Access-MarvisExt.uskey "
               + "是否按本次请求上下文（conv / resp / scene / model / nonce / openid）用 Beacon SDK 现算。"
               + "插件已按 bus_info 出票；若连续出现，检查 native/ 的 4 个文件是否齐全、qimei36 是否真实，"
-              + "或设置 MARVIS_USKEY_URL 指向外部出票服务。换账号没用，换 IP / UA 也无效 ——"
+              + "或设置 MARVIS_USKEY_URL 指向外部出票服务。"
+              + "若只有**这一个账号**被拦：是账号级节奏风控，换别的账号可用、等这个号冷却即可（0.8.0 起按账号隔离）；"
+              + "若**多个账号**接连都这样：是通道级封锁（uskey / UA / IP），换账号也没用 ——"
               + `原始返回：${text.slice(0, 300)}`
 
           // ── 0.7.7：PC 端 4100404 自动 WS 回退 ──────────────────────

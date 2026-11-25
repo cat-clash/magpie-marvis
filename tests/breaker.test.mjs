@@ -148,9 +148,12 @@ test("持久化 roundtrip：新实例恢复 openedAt / consecutiveOpens / failur
   a.record(false) // 探测失败重开：consec 1，冷却 20_000
   advance(5_000) // 走到一半
   const disk = JSON.parse(readFileSync(join(dir, "breaker-state.json"), "utf8"))
-  assert.equal(disk.consecutiveOpens, 1)
-  assert.equal(disk.openedAt, 1_010_000)
-  assert.equal(disk.failures, 2)
+  // 0.8.0：状态文件升为 v2 多桶格式，无 bucket 参数的实例落在全局桶 "*"
+  assert.equal(disk.version, 2)
+  const slot = disk.accounts["*"]
+  assert.equal(slot.consecutiveOpens, 1)
+  assert.equal(slot.openedAt, 1_010_000)
+  assert.equal(slot.failures, 2)
   // 新实例（同目录、同时钟）：恢复状态继续熔断
   const b = createBreaker({ threshold: 1, cooldownMs: 10_000, now, random: ZERO_JITTER })
   assert.equal(b.open, true, "新实例加载持久化状态仍熔断")

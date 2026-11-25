@@ -1,5 +1,34 @@
 # 更新记录
 
+## 0.8.0 — 2026-11-25
+
+- **按账号隔离：风控熔断与请求节奏闸都改成 per-account 分桶**（默认开启）。用户反馈「登录多个账号时，
+  个别账号被限流会让其它账号一起不可用」—— 根因是 `src/breaker.mjs` 的 `riskBreaker` 与
+  `src/pacing.mjs` 的 `pacingWait` 都是**进程级单例**，`breaker-state.json` 也只有一个扁平状态槽：
+  magpie 壳每次请求只传当前选中的那一个账号（`src/hooks/loader.mjs` 的 `credsOf(auth)`），插件侧没有
+  账号池，于是「谁被拦」的信息在状态层被抹平 —— 一个号熔断等于所有号全停。
+  - `createBreaker({ bucket, label, onOpen })`：状态升 v2
+    `{version:2, accounts:{[bucket]:{label,consecutiveOpens,openedAt,failures}}}`；读到 v1 扁平格式整体归入
+    全局桶 `"*"`（老用户已有冷却不丢）；写盘只改自己那个桶，不动兄弟桶。
+  - `accountKeyOf(creds)` = `sha256(openid|uid)` 前 12 位（不落 openid 明文）；
+    `accountLabelOf(creds)` = 首 4 + 尾 4 脱敏标签（报错文案与 CLI 展示用）。
+  - `getBreaker(bucket, label, opts)` 进程级池；`riskBreaker` 保留为全局桶实例 —— 旧导出形状不变，
+    `tests/breaker.test.mjs` 的兼容断言照旧通过。
+  - `pacingWait(key)`：每个账号一条独立时间轴，A 号在等最小间隔时 B 号立刻放行；
+    无参调用仍落 `"*"` 桶（旧行为/旧测试不变）；`MARVIS_PACING_SCOPE=global` 回到总速率压平。
+  - **跨账号共因闸**（保留原来那层保护）：`MARVIS_RISK_WINDOW_MS`（默认 10min）内 ≥
+    `MARVIS_RISK_CONSENSUS`（默认 2）个**不同账号**各自开闸 → 判定拦的是通道（IP / UA / uskey / 上游节点），
+    自动把全局桶也打开。`MARVIS_RISK_CONSENSUS=0` = 纯隔离，永不自动升级。
+  - `MARVIS_RISK_SCOPE=account|global` 选择熔断作用域，默认 `account`；未知值当 `account`。
+  - 报错文案改为「账号「XXXX」风控冷却中…（**其他账号不受影响**）」，并指向解封命令；
+    4100404 的 429 文案补上「只有这一个账号被拦 = 账号级；多个账号接连被拦 = 通道级」的区分。
+  - 新增 `scripts/breaker-cli.mjs` 与 `node scripts/cli.mjs breaker [list|reset]`
+    （`list --json`、`reset <bucket|label 子串>`、`reset --all`）。
+  - 新增 `tests/account-isolation.test.mjs`（18 例）：A 开闸 B 照常可用、v2 多桶落盘互不覆盖、v1 迁移进全局桶、
+    共因闸开/关、pacing 分桶与 global 回退、无参向后兼容、`breakerBuckets` / `resetAllBreakers`、
+    CLI 的 `--help` / `list --json` / `reset` / `reset --all`，以及 loader 接线断言（不回归到进程单例）。
+  - 测试：全套 **406 例 400 pass / 0 fail / 6 skip**；`scripts/check.mjs` 40 通过 / 1 警告 / 0 失败。
+
 ## 0.7.16 — 2026-11-25
 
 - **仓库转私有后的 phone-kit 下载说明**（纯文档，插件行为不变）：匿名访问 Release 附件直链会返回 404，

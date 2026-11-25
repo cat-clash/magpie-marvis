@@ -1,4 +1,4 @@
-# 腾讯 Marvis · magpie 供应商插件（0.7.16）
+# 腾讯 Marvis · magpie 供应商插件（0.8.0）
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 >
@@ -29,13 +29,23 @@ system 独立置顶保留；`agent.run` 的 requestId 已唯一化。
 **风控与节奏（0.7.0）**：出站补全请求受请求节奏闸 pacing 约束——
 `MARVIS_MIN_REQUEST_INTERVAL_MS`（默认 `800`）控制最小间隔，`MARVIS_REQUEST_JITTER_MS`（默认 `400`）叠加随机抖动；
 熔断器退避改为指数退避并持久化到 `<稳定资产目录>/breaker-state.json`（重启不丢）。
+**0.8.0 起两者都按账号分桶** —— 一个账号被拦只冷却这个账号，其他账号照常出网
+（`MARVIS_RISK_SCOPE=global` / `MARVIS_PACING_SCOPE=global` 可退回旧的「全停」行为）。
 **随机 uskey 兜底默认关闭（0.7.0 行为变更）**：没有 `native/`、也没有 `MARVIS_USKEY_URL` 时直接 fail-fast
 报可操作错误，不再静默放行随机票（线上必 `4100404`）；显式设 `MARVIS_ALLOW_RANDOM_USKEY=1` 可找回旧兜底（仅开发排查用）。
 主动续期：token 剩余时效不足 `MARVIS_REFRESH_LEAD_MS`（默认 30 天，clamp 微信 TTL 1/3）时提前续期，
 同账号最多每 `MARVIS_REFRESH_MIN_INTERVAL_MS`（默认 1 小时）续一次；微信 2h token 不再周期性掉线。
 完整环境变量见 [README-FINAL](./README-FINAL.md)。
 
-## 0.7.4 – 0.7.16 新增（手机上最常用的几条）
+## 0.7.4 – 0.8.0 新增（手机上最常用的几条）
+
+- **多账号互不牵连：熔断 / 节奏闸按账号分桶**（0.8.0，默认开启，PC 与手机同效）：以前一个账号被
+  `4100404` 拦住会让**所有**账号一起停（进程级单例熔断 + 单条 pacing 时间轴）。现在每个账号各有一条
+  独立的失败计数 / 指数退避 / 请求节奏 —— A 号在冷却时，B 号照常出网。报错会写明是哪个账号在冷却；
+  `node scripts/cli.mjs breaker` 看各账号状态，`breaker reset <账号>` 立刻解封。
+  想找回旧的「一个号出事全停」：`MARVIS_RISK_SCOPE=global` 与 `MARVIS_PACING_SCOPE=global`。
+  多个账号**接连**被拦（默认 2 个 / 10 分钟内）说明拦的是通道而不是账号，这时才会自动回到全局冷却
+  （`MARVIS_RISK_CONSENSUS` 可调，设 0 = 纯隔离）。
 
 - **首选：直接把电脑端登录态导到手机**（0.7.14 起首选路径）：不用扫码、不用守着电脑 ——
   电脑 magpie 配置目录的 `plugin-auth.json` 里把 `marvis#` 开头的条目导出成一个小 JSON，手机 Termux 里跑

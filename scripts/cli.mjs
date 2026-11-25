@@ -19,6 +19,7 @@ const COMMANDS = {
   create: "create.mjs",
   accounts: "accounts.mjs",
   "import-login": "import-login.mjs",
+  breaker: "breaker-cli.mjs",
 }
 
 function parseArgs(argv) {
@@ -97,12 +98,13 @@ async function doctorPhone(argv) {
 function usage(stream = process.stdout) {
   stream.write(
     [
-      "用法：magpie-plugin <check|create|accounts|import-login|doctor:phone> [参数]",
+      "用法：magpie-plugin <check|create|accounts|import-login|breaker|doctor:phone> [参数]",
       "",
       "  check  [目录]                 检查供应商插件，退出码 0 = 合规",
       "  create --dir <目录> --provider <id> --name <显示名>   从模板生成新插件",
       "  accounts list|logout|remove   取消登录 / 移除账号（写 plugin-auth.json，带备份）",
       "  import-login <文件.json>      把另一台机器导出的登录态合并进本机 magpie（手机走不通扫码时用）",
+      "  breaker [list|reset]          查看 / 解除按账号分桶的风控熔断（0.8.0：一个号被拦不拖累其他号）",
       "  doctor:phone [--port 8088]    手机本地网关一键自检（配置、诊断脚本、/v1/models）",
       "",
       "示例：",
@@ -110,6 +112,8 @@ function usage(stream = process.stdout) {
       '  npx --yes github:MYCF711/magpie-plugin-scaffold#v0.3.6 create --dir my-provider --provider huawei --name "华为云 HUAWEI"',
       "  node scripts/cli.mjs doctor:phone --port 8088",
       "  node scripts/cli.mjs import-login marvis-desktop-login.json --yes",
+      "  node scripts/cli.mjs breaker list",
+      "  node scripts/cli.mjs breaker reset --all",
       "",
     ].join("\n"),
   )

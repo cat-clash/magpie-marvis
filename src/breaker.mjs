@@ -30,12 +30,30 @@
 //     测试会改 MARVIS_NATIVE_DIR；首次访问惰性加载。容错：损坏 JSON 当无状态、
 //     openedAt 领先当前时刻超过 5 分钟视为时钟偏移（整个状态忽略）、状态总年龄超过冷却
 //     上限视为已关闭；写盘 try/catch 静默，绝不影响请求路径；写盘频率 = 每次状态变化。
-//   · 熔断按「进程内单例」生效 —— provider id 固定 marvis，多账号共享同一个上游风控域，
-//     共享熔断是有意的：一个号被拦，兄弟账号同时时段密集请求同样危险。
+//   · 熔断按**账号分桶**（0.8.0 起，MARVIS_RISK_SCOPE=account 为默认）——
+//     一个号被 4100404 拦住只冷却这个号，兄弟账号照常出网。
+//     旧行为（所有账号共享一个闸）用 MARVIS_RISK_SCOPE=global 找回；
+//     MARVIS_RISK_SCOPE=off 后退到「一个账号一个桶但永不互相影响」，等价 account。
+//
+//     为什么改：magpie 壳一次请求只传**当前选中的那一个账号**（loader 的 credsOf(auth)），
+//     插件侧本来就没有账号池；原来的进程单例让「个别账号被限流」变成「所有账号一起停」，
+//     这正是用户抱怨的点。分桶后每个账号各有一条独立的失败计数 / 冷却 / 退避链。
+//
+//   · 跨账号共因闸（保留原保护，0.8.0 新增）：分桶之后还剩一个风险 —— 如果**多个不同
+//     账号**在短时间内先后被 4100404 拦住，说明拦的不是账号而是通道（IP / UA / uskey /
+//     上游节点）。此时自动把 `"*"` 全局桶也打开，等于回到旧的「全停」行为。
+//     MARVIS_RISK_CONSENSUS（默认 2，设 0 = 关闭共因闸）：窗口内被拦的不同账号数达到它才开；
+//     MARVIS_RISK_WINDOW_MS（默认 600000 = 10min）：判定窗口。
+//
+//   · 持久化形状升到 v2（0.8.0）：{ version: 2, accounts: { [bucket]: {label?, consecutiveOpens,
+//     openedAt, failures} } }。读到 v1 扁平格式（无 version/accounts）时整体归入 `"*"` 桶 ——
+//     老用户的已有冷却不会因为升级而丢失。bucket 是账号标识的短哈希（见 accountKeyOf），
+//     不落 openid 明文；label 只存脱敏后的可读标签，供 CLI 与报错文案使用。
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
+import { createHash } from "node:crypto"
 
 const DEFAULT_THRESHOLD = 5
 const DEFAULT_COOLDOWN_MS = 1_800_000
@@ -66,15 +84,127 @@ function stateFilePath() {
   return join(resolveStableDir(), "breaker-state.json")
 }
 
+const DEFAULT_CONSENSUS = 2 // 窗口内被拦的**不同账号**数达到几个才判定为通道级封锁
+const DEFAULT_CONSENSUS_WINDOW_MS = 10 * 60 * 1_000 // 共因判定窗口
+const GLOBAL_BUCKET = "*" // 全局桶 / 未指定账号时的退化桶
+
+/**
+ * 熔断作用域（0.8.0）：
+ *   account（默认）= 按账号分桶，一个号被拦只冷却这个号
+ *   global        = 旧行为，所有账号共用一个闸
+ * 未知值一律当 account（宁可隔离过度，也不要一个号拖垮全部）。
+ */
+export function riskScope() {
+  const v = String(process.env.MARVIS_RISK_SCOPE ?? "").trim().toLowerCase()
+  return v === "global" ? "global" : "account"
+}
+
+/** 共因闸配置：n=0 表示关闭（分桶后永不自动升级为全局冷却） */
+function consensusConfig() {
+  return {
+    n: intEnv("MARVIS_RISK_CONSENSUS", DEFAULT_CONSENSUS, { allowZero: true }),
+    windowMs: intEnv("MARVIS_RISK_WINDOW_MS", DEFAULT_CONSENSUS_WINDOW_MS),
+  }
+}
+
+/**
+ * 账号 → 桶 key：稳定短哈希，不落 openid 明文。
+ * 没有凭据时退化为全局桶（这种账号本来也发不出请求，共用一个闸不会误伤别人）。
+ */
+export function accountKeyOf(creds) {
+  const raw = String(creds?.openid ?? creds?.uid ?? creds?.accountId ?? "").trim()
+  if (!raw) return GLOBAL_BUCKET
+  return createHash("sha256").update(raw).digest("hex").slice(0, 12)
+}
+
+/** 账号 → 可读标签（脱敏：首 4 + 尾 4），只用于 CLI 列表与报错文案 */
+export function accountLabelOf(creds) {
+  const raw = String(creds?.openid ?? creds?.uid ?? creds?.accountId ?? "").trim()
+  if (!raw) return "未指定账号"
+  return raw.length <= 10 ? raw : `${raw.slice(0, 4)}…${raw.slice(-4)}`
+}
+
+/** 读整份状态（v2 多桶 / v1 扁平兼容）；一切异常都当空 */
+function readState() {
+  try {
+    const data = JSON.parse(readFileSync(stateFilePath(), "utf8"))
+    if (!data || typeof data !== "object") return {}
+    if (data.version === 2 && data.accounts && typeof data.accounts === "object") {
+      const out = {}
+      for (const [k, v] of Object.entries(data.accounts)) {
+        if (v && typeof v === "object") out[k] = v
+      }
+      return out
+    }
+    // v1（扁平单账号格式）：整体归入全局桶 —— 老用户的冷却不会因升级丢失
+    if ("consecutiveOpens" in data || "openedAt" in data || "failures" in data) {
+      return { [GLOBAL_BUCKET]: data }
+    }
+    return {}
+  } catch {
+    return {}
+  }
+}
+
+/** 写整份状态（v2） */
+function writeState(accounts) {
+  try {
+    mkdirSync(resolveStableDir(), { recursive: true })
+    writeFileSync(stateFilePath(), JSON.stringify({ version: 2, accounts }))
+  } catch {
+    /* 写盘失败不影响请求路径 */
+  }
+}
+
+/** 状态文件路径（CLI / 诊断打印用） */
+export function breakerStatePath() {
+  return stateFilePath()
+}
+
+/** 诊断 / CLI：列出所有桶 {bucket, label, failures, openedAt, consecutiveOpens, retryAfterMs} */
+export function breakerBuckets(nowMs = Date.now()) {
+  const all = readState()
+  return Object.entries(all).map(([bucket, s]) => {
+    const openedAt = clampInt(s.openedAt)
+    const failures = clampInt(s.failures)
+    const consecutiveOpens = clampInt(s.consecutiveOpens)
+    const base = intEnv("MARVIS_RISK_COOLDOWN_MS", DEFAULT_COOLDOWN_MS, { allowZero: true })
+    let retryAfterMs = 0
+    if (openedAt > 0 && base > 0) {
+      const capped = Math.min(base * 2 ** consecutiveOpens, MAX_COOLDOWN_MS)
+      retryAfterMs = Math.max(0, capped - (nowMs - openedAt))
+    }
+    return {
+      bucket,
+      label: typeof s.label === "string" && s.label ? s.label : bucket === GLOBAL_BUCKET ? "全局" : bucket,
+      failures,
+      consecutiveOpens,
+      openedAt,
+      retryAfterMs,
+    }
+  })
+}
+
+/**
+ * @param {object} [opts]
+ * @param {string} [opts.bucket] 账号桶 key（默认全局桶 `"*"`；见 accountKeyOf）
+ * @param {string} [opts.label]  可读标签（脱敏账号名），随状态落盘供 CLI 展示
+ * @param {(info:{bucket:string,at:number}) => void} [opts.onOpen]
+ *        开闸回调（只在**失败触发**的开闸时调用，`trip()` 不触发）—— 共因闸挂在这里
+ */
 export function createBreaker({
   threshold = DEFAULT_THRESHOLD,
   cooldownMs = DEFAULT_COOLDOWN_MS,
   now = Date.now,
   random = Math.random,
+  bucket = GLOBAL_BUCKET,
+  label = "",
+  onOpen,
 } = {}) {
   threshold = intEnv("MARVIS_RISK_THRESHOLD", threshold)
   // 0 = 禁用熔断（loader 文案早已承诺这个开关，这里真正落实）
   cooldownMs = intEnv("MARVIS_RISK_COOLDOWN_MS", cooldownMs, { allowZero: true })
+  bucket = String(bucket || GLOBAL_BUCKET)
 
   // —— 内存状态（loadState 之前均为初始值）——
   let failures = 0 // 连续失败计数
@@ -102,7 +232,7 @@ export function createBreaker({
     if (loaded) return
     loaded = true
     try {
-      const data = JSON.parse(readFileSync(stateFilePath(), "utf8"))
+      const data = readState()[bucket]
       if (!data || typeof data !== "object") return
       const opened = Number(data.openedAt)
       if (Number.isFinite(opened) && opened > 0) {
@@ -122,14 +252,14 @@ export function createBreaker({
     }
   }
 
-  /** 每次状态变化落盘；失败静默，绝不影响请求路径 */
+  /** 每次状态变化落盘（只改自己这个桶，其余桶原样保留）；失败静默，绝不影响请求路径 */
   function persist() {
-    try {
-      mkdirSync(resolveStableDir(), { recursive: true })
-      writeFileSync(stateFilePath(), JSON.stringify({ consecutiveOpens, openedAt, failures }))
-    } catch {
-      /* 写盘失败不影响请求路径 */
-    }
+    const all = readState()
+    const entry = { consecutiveOpens, openedAt, failures }
+    if (label) entry.label = label
+    else if (all[bucket]?.label) entry.label = all[bucket].label
+    all[bucket] = entry
+    writeState(all)
   }
 
   /** 冷却是否已到期（到期则跃迁到半开；halfOpen 只在此处置位，不落盘） */
@@ -150,6 +280,14 @@ export function createBreaker({
     activeCooldown = computeCooldown(consecutiveOpens)
     pushEvent(fromProbe ? "reopen" : "open", activeCooldown)
     persist()
+    // 共因闸挂点：只在失败触发的开闸上报（trip() 本身不回调，避免自我递归）
+    if (typeof onOpen === "function") {
+      try {
+        onOpen({ bucket, at: openedAt })
+      } catch {
+        /* 回调失败不影响熔断本身 */
+      }
+    }
   }
 
   function closeBreaker() {
@@ -230,6 +368,22 @@ export function createBreaker({
       loadState()
       closeBreaker()
     },
+    /**
+     * 外部开闸（0.8.0）：不算失败、不递增退避链，只为「不是这个账号的问题」的判定
+     * （跨账号共因 / 通道级封锁）套一层冷却。已在冷却中则不改动。
+     * 注意：不触发 onOpen 回调，避免共因闸自我递归。
+     */
+    trip(reason = "external") {
+      loadState()
+      expireIfDue()
+      if (cooldownMs <= 0) return
+      if (openedAt && !halfOpen) return // 已在冷却：保留原冷却与退避链
+      openedAt = now()
+      halfOpen = false
+      activeCooldown = computeCooldown(consecutiveOpens)
+      pushEvent(String(reason) || "external", activeCooldown)
+      persist()
+    },
     /** 最近 limit 条风险事件（内存环形缓冲 ≤50，不落盘；limit ≤ 0 返回空） */
     events(limit = MAX_EVENTS) {
       loadState()
@@ -240,10 +394,68 @@ export function createBreaker({
   }
 }
 
-/** 进程级单例：loader 与 WS 路径共用同一份状态 */
-export const riskBreaker = createBreaker()
+// —— 进程级按账号分桶的池（0.8.0）：一个账号一条独立的失败/冷却/退避链 ——
 
-/** 诊断面板用：进程单例最近 limit 条风险事件（{at, type, cooldownMs}，按时间追加） */
+const pool = new Map() // bucket → breaker 实例
+const labels = new Map() // bucket → 可读标签（CLI 列表与报错文案用）
+const tripLog = [] // { bucket, at }：共因判定窗口内的开闸记录
+
+/**
+ * 共因判定：MARVIS_RISK_WINDOW_MS 内**不同账号**开闸数 ≥ MARVIS_RISK_CONSENSUS 时，
+ * 判定拦的不是账号而是通道（IP / UA / uskey / 上游节点），把全局桶也打开。
+ * 分桶带来的新风险正好被这一层兜住。
+ */
+function noteBucketTrip(bucketName) {
+  if (bucketName === GLOBAL_BUCKET) return
+  const { n, windowMs } = consensusConfig()
+  if (n <= 0) return // 共因闸关闭：纯分桶
+  const t = Date.now()
+  tripLog.push({ bucket: bucketName, at: t })
+  while (tripLog.length && t - tripLog[0].at > windowMs) tripLog.shift()
+  if (new Set(tripLog.map((e) => e.bucket)).size < n) return
+  tripLog.length = 0
+  getBreaker(GLOBAL_BUCKET, "跨账号共因").trip("cross-account")
+}
+
+/**
+ * 取某个账号桶的熔断器（惰性创建，进程内复用）。
+ * `bucket` 用 accountKeyOf(creds)；`label` 传 accountLabelOf(creds) 便于 CLI 显示；
+ * `opts` 只在该桶**首次创建**时透传给 createBreaker（threshold / cooldownMs / now / random，
+ * 测试与自定义装配用；onOpen 由池统一接管，不可覆盖）。
+ */
+export function getBreaker(bucket = GLOBAL_BUCKET, label = "", opts = {}) {
+  const key = String(bucket || GLOBAL_BUCKET)
+  if (label) labels.set(key, label)
+  let b = pool.get(key)
+  if (!b) {
+    b = createBreaker({
+      ...opts,
+      bucket: key,
+      label: labels.get(key) ?? "",
+      onOpen: () => noteBucketTrip(key), // 放在最后：池统一接管共因上报
+    })
+    pool.set(key, b)
+  }
+  return b
+}
+
+/** 人为解除所有桶的冷却（CLI `breaker reset --all`） */
+export function resetAllBreakers() {
+  const keys = new Set([...Object.keys(readState()), ...pool.keys()])
+  for (const k of keys) getBreaker(k).reset()
+  tripLog.length = 0
+  return keys.size
+}
+
+/** 兼容导出：全局桶实例（旧的进程单例语义；account 作用域下它只在共因闸/无凭据时生效） */
+export const riskBreaker = getBreaker(GLOBAL_BUCKET)
+
+/** 诊断面板用：全局桶最近 limit 条风险事件（{at, type, cooldownMs}，按时间追加） */
 export function riskEvents(limit = MAX_EVENTS) {
   return riskBreaker.events(limit)
+}
+
+/** 诊断面板用：指定账号桶最近 limit 条风险事件 */
+export function riskEventsOf(bucket = GLOBAL_BUCKET, limit = MAX_EVENTS) {
+  return getBreaker(bucket).events(limit)
 }

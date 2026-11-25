@@ -283,7 +283,11 @@ test("4100404 风控 → 429 + Retry-After（fail-fast，不让宿主连试 7 �
     assert.ok(Number(res.headers.get("retry-after")) >= 1, "必须带 retry-after")
     const out = await res.json()
     assert.equal(out.error.code, "risk_blocked")
-    assert.match(out.error.message, /换账号没用/, "否则用户只会不停地换号")
+    // 0.8.0：熔断按账号分桶，「换账号没用」只在通道级封锁时才成立 ——
+    // 文案现在必须把两种情形分开说，别再让用户无脑换号。
+    assert.match(out.error.message, /这一个账号/, "先告诉用户这是账号级的")
+    assert.match(out.error.message, /多个账号/, "再说明什么情况才是通道级")
+    assert.match(out.error.message, /换账号也没用/, "通道级时换号确实没用")
     assert.match(out.error.message, /remote/, "要指路手机会话域的 WS 通道")
   } finally {
     s.restore()

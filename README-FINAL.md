@@ -1,4 +1,4 @@
-# magpie-marvis-final · Marvis 最终版插件（0.7.16 · PC + 手机通用）
+# magpie-marvis-final · Marvis 最终版插件（0.8.0 · PC + 手机通用）
 
 > provider id 固定为 `marvis` —— 已有账号、路由组、模型配置**全部无缝沿用**。
 > 本版合并了 3 条线的全部可用成果：`MYCF711/magpie-marvis`（0.2.58 现签修复）·
@@ -65,6 +65,43 @@ MARVIS_TRANSPORT = gateway    ← 默认推荐：本地 OpenAI 兼容网关 http
   随机抖动 `MARVIS_REQUEST_JITTER_MS`（默认 `400`），压平请求节奏。
 - **随机 uskey 兜底默认关闭（0.7.0 行为变更）**：没有 `native/`、也没有 `MARVIS_USKEY_URL` 时 **fail-fast**
   报可操作错误，不再静默放行随机票（线上必 `4100404`）；显式设 `MARVIS_ALLOW_RANDOM_USKEY=1` 才找回旧兜底（仅开发排查用）。
+
+### 多账号按账号隔离（0.8.0，默认开启）
+
+背景：同一个 magpie 里登录多个 Marvis 账号时，**个别账号被限流会连累其他账号**。根因不在账号本身，
+而在插件把「限流状态」存成了进程级单例：`src/breaker.mjs` 的 `riskBreaker` 与 `src/pacing.mjs` 的
+`pacingWait` 全局各只有一份，`breaker-state.json` 也只有一个扁平槽。壳每次请求只传**当前选中的那一个
+账号**（`src/hooks/loader.mjs:434` `credsOf(auth)`），插件侧没有账号池 —— 于是「谁被拦」在状态层被抹平，
+一个号熔断等于全部停。
+
+0.8.0 改成按账号分桶：
+
+| 维度 | 0.7.x（旧） | 0.8.0（默认） |
+|---|---|---|
+| 失败计数 / 冷却 / 退避链 | 全进程一份 | 每个账号一份 |
+| 请求最小间隔 + 抖动 | 全进程一条时间轴 | 每个账号一条 |
+| 状态文件 | `{consecutiveOpens, openedAt, failures}` | `{version:2, accounts:{[账号桶]:{…}}}` |
+| 一个号被拦 | 所有号一起停 | **只停这一个号** |
+
+- 账号桶 = `sha256(openid || uid)` 前 12 位（不落 openid 明文）；展示名 = 首 4 + 尾 4 脱敏。
+- 旧的 `breaker-state.json` 扁平格式会被整体读进全局桶 `"*"`，**升级后已有的冷却不会丢**。
+- 想知道现在谁在冷却 / 想立刻解封：
+
+```bash
+node scripts/cli.mjs breaker              # 各账号：失败次数 / 冷却剩余 / 重开次数
+node scripts/cli.mjs breaker list --json  # 机器可读
+node scripts/cli.mjs breaker reset QQ·1   # 解除某个账号（bucket 或脱敏名子串）
+node scripts/cli.mjs breaker reset --all  # 全部解除
+```
+
+- 开关：`MARVIS_RISK_SCOPE=global`（熔断回到全局）、`MARVIS_PACING_SCOPE=global`（节奏闸回到全局）——
+  两个都设才完全等同 0.7.x。
+- **跨账号共因闸**：分桶后还剩一个风险 —— 如果拦的不是账号而是通道（IP / UA / uskey / 上游节点），
+  隔离会让每个号轮流撞一遍。所以默认保留一层兜底：`MARVIS_RISK_WINDOW_MS`（默认 10 分钟）内
+  **≥ `MARVIS_RISK_CONSENSUS`（默认 2）个不同账号**各自开闸时，自动把全局桶也打开（等于旧行为）。
+  想纯隔离：`MARVIS_RISK_CONSENSUS=0`。
+- 判读技巧：只有**一个**账号 429 / `4100404` = 账号级节奏风控，换号可用、等这个号冷却即可；
+  **多个**账号接连出现 = 通道级封锁，换号也没用，该换 IP / 重签 uskey / 改走 `MARVIS_WS_MODE=remote`。
 
 ## 三、PC 端安装（magpie / OpenCode）
 
