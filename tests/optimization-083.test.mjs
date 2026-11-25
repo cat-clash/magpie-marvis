@@ -32,7 +32,7 @@ test("openclawMode(modeOverride)：显式模式覆盖 env/文件，且不改 pro
 
 test("loader 自动 WS 回退：不再写 process.env.MARVIS_WS_MODE", () => {
   const src = readFileSync(join(ROOT, "src", "hooks", "loader.mjs"), "utf8")
-  assert.match(src, /const relayOpts = \{ signal: init\?\.signal, mode: "relay" \}/, "单次请求参数")
+  assert.match(src, /const relayOpts = \{[^\n]*mode: "relay"[^\n]*conversationId: relayConversationId \}/, "单次请求参数含会话复用")
   assert.doesNotMatch(src, /process\.env\.MARVIS_WS_MODE\s*=\s*"relay"/, "不再赋值全局 env")
   assert.doesNotMatch(src, /savedMode/, "旧的 env 保存/恢复逻辑已删掉")
 })

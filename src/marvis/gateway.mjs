@@ -99,16 +99,22 @@ function relayHint(url) {
  *
  * @param {{openid?:string, accessToken?:string, guid?:string}} creds  （本地通道不校验，保留签名一致）
  * @param {{messages:any[], model?:string}} payload
- * @param {{signal?:AbortSignal}} [opts]
+ * @param {{signal?:AbortSignal, conversationId?:string}} [opts]
+ *   conversationId：由调用方传入时**复用**该会话（一次逻辑请求的所有重试共用一条 conv_*），
+ *   不传才新建 —— 旧版每次调用都新建，403 候选池/探针会在 PC 客户端刷出成百上千条空会话。
  */
-export async function* gatewayChatStream(creds, payload, { signal } = {}) {
+export async function* gatewayChatStream(creds, payload, { signal, conversationId } = {}) {
   const baseUrl = process.env.MARVIS_GW_URL || DEFAULT_URL
   const token = localGatewayToken()
   const url = withToken(baseUrl, token)
   const timeout = Number(process.env.MARVIS_GW_TIMEOUT || 180_000)
 
   const ws = new WebSocket(url)
-  const conversationId = `conv_${hex32()}`
+  // 一次逻辑请求只建一条会话：调用方（loader）生成一次并贯穿所有重试。
+  // 环境变量 MARVIS_GATEWAY_CONVERSATION_ID 可把全部插件流量钉在一条会话里（诊断用）。
+  const sticky = String(process.env.MARVIS_GATEWAY_CONVERSATION_ID || "").trim()
+  const convId = sticky || String(conversationId || "") || `conv_${hex32()}`
+  const conversationIdUsed = /^conv_[0-9a-f]{32}$/i.test(convId) ? convId : `conv_${hex32()}`
   const responseId = `resp_${hex32()}`
 
   // WS 回调是推模型、generator 是拉模型：中间用「待发队列 + 唤醒器」桥接，
@@ -242,7 +248,7 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
         requestId: randomUUID(),
         event: "agent.run",
         payload: {
-          conversation_id: conversationId,
+          conversation_id: conversationIdUsed,
           message: prompt,
           response_id: responseId,
           attachments: [],

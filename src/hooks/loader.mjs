@@ -9,6 +9,7 @@
 // ⚠ 实测：把 UAL 签名头（md5 body+ts+accessKey+nonce）加到模型网关上是**错的** ——
 //   会从 403 风控变成 401 登录态过期。那套只用于 /v3/*。
 
+import { randomUUID } from "node:crypto"
 import { BASE_V1, DEFAULT_MODEL, DISPLAY_BY_SLOT, PROVIDER, canonicalModelId, isUnavailableModel, FIRST_LINE_OPTION_KEY, OFFICIAL_FIRST_LINE } from "../context.mjs"
 import { llmHeaders } from "../marvis/protocol.mjs"
 import { directFetch, directPost, directTransport } from "../marvis/directnet.mjs"
@@ -528,6 +529,13 @@ export function loaderHook(input, options = {}) {
         }
 
         /**
+         * 一次逻辑请求（含所有 403 兜底/候选池/护栏重试）共用**一条** Marvis 会话。
+         * 旧版每次 callUpstream 都新建 conv_*，候选池一次能刷出 6 条空会话；这里生成一次，
+         * 贯穿整个重试链。MARVIS_GATEWAY_CONVERSATION_ID 可进一步把所有插件流量钉在一条会话。
+         */
+        const relayConversationId = `conv_${randomUUID().replace(/-/g, "")}`
+
+        /**
          * 发一次上游请求。**每次都重新签 uskey** —— 它是一次性的：
          * 403 兜底重试若复用上一次的 uskey，会直接撞风控（`risk_blocked`），
          * 看起来像另一个故障，排查时会被带偏。
@@ -548,7 +556,7 @@ export function loaderHook(input, options = {}) {
             // 现成的 chatChunkSse，与直连路径 normalizeStreaming 透传的 SSE 形状一致。
             // 非流式请求走原聚合路径，行为零变化。
             if (json?.stream) {
-              const iterator = openclawChatStream(creds, json, { signal: init?.signal })
+              const iterator = openclawChatStream(creds, json, { signal: init?.signal, conversationId: relayConversationId })
               // 预取首帧：连接 / 握手 / ACK / 无内容 RUN_ERROR 的失败在这里以 throw
               // 暴露，仍由下方 callUpstream 的统一 catch 映射成 503 错误响应 ——
               // 不会退化成「200 + 空流」。chunk 帧从第一帧起继续。
@@ -563,7 +571,7 @@ export function loaderHook(input, options = {}) {
                 },
               })
             }
-            const result = await openclawChat(creds, json, { signal: init?.signal })
+            const result = await openclawChat(creds, json, { signal: init?.signal, conversationId: relayConversationId })
             return openclawResponse(json, result)
           }
           let headers
@@ -992,7 +1000,7 @@ export function loaderHook(input, options = {}) {
               //   "relay"、finally 里恢复，并发请求会在窗口期看到被劫持的模式（A 号回退
               //   把 B 号也拖进 WS）。改为把 mode 作为**单次请求参数**透传给 openclaw 调用链
               //   （cfg(modeOverride) → openclawChatStream / openclawChat），天然并发安全。
-              const relayOpts = { signal: init?.signal, mode: "relay" }
+              const relayOpts = { signal: init?.signal, mode: "relay", conversationId: relayConversationId }
               try {
                 autoTried = true
                 if (requestJson?.stream) {

@@ -467,9 +467,10 @@ function killApp(cmd) {
  *
  * @param {{openid:string, accessToken:string, guid?:string}} creds
  * @param {{messages:any[], model?:string}} payload
- * @param {{signal?:AbortSignal, mode?:string}} [opts] mode=单次请求覆盖传输模式（relay/remote/off）
+ * @param {{signal?:AbortSignal, mode?:string, conversationId?:string}} [opts] mode=单次请求覆盖传输模式（relay/remote/off）；
+ *   conversationId=一次逻辑请求复用同一条 conv_*（贯穿 403 重试链，避免刷屏）
  */
-export async function* openclawChatStream(creds, payload, { signal, mode } = {}) {
+export async function* openclawChatStream(creds, payload, { signal, mode, conversationId } = {}) {
   const c = cfg(mode)
   if (c.mode === "off") throw new Error("openclaw transport 已关闭（MARVIS_WS_MODE=off）")
 
@@ -477,7 +478,7 @@ export async function* openclawChatStream(creds, payload, { signal, mode } = {})
   // 这是 2026-11-23 实测确认的格式；openclaw 的 method:connect 只适用于远端 wss。
   if (c.mode === "relay") {
     const { gatewayChatStream } = await import("./gateway.mjs")
-    yield* gatewayChatStream(creds, payload, { signal })
+    yield* gatewayChatStream(creds, payload, { signal, conversationId })
     return
   }
 
@@ -758,7 +759,7 @@ async function* openclawRemoteStream(creds, payload, c, { signal } = {}) {
  *
  * @param {{openid:string, accessToken:string, guid?:string}} creds
  * @param {{messages:any[], model?:string}} payload
- * @param {{signal?:AbortSignal}} [opts]
+ * @param {{signal?:AbortSignal, mode?:string, conversationId?:string}} [opts]
  */
 export async function openclawChat(creds, payload, opts = {}) {
   // relay 经 gateway 通道，默认模型名沿用 gateway 的 "marvis-gateway"；remote 用 "marvis-ws"
