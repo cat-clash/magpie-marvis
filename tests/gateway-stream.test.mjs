@@ -21,6 +21,9 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createServer } from "node:http"
 import { createHash } from "node:crypto"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { gatewayChat, gatewayChatStream, flatten } from "../src/marvis/gateway.mjs"
 
@@ -111,6 +114,8 @@ async function startMockGateway() {
     deltas: ["你", "好", "，", "世界"],
     failWith: null,
     riskBlocked: false,
+    /** 只在 status 帧上报失败、不给 RUN_ERROR（上游另一种形态：原因藏在 status 里） */
+    riskStatusOnly: false,
     agentRuns: [],
     sockets: new Set(),
   }
@@ -172,6 +177,23 @@ async function startMockGateway() {
             event: "ag_ui_event",
             data: { event: "RUN_ERROR", code: "risk_control_blocked", message: "当前环境有误，暂时无法回答你的问题，稍后再试试吧～" },
           })
+          return
+        }
+        // 风控的另一种形态：只给 status=failed，不给 code（原因的定性只能靠文案）
+        if (state.riskStatusOnly) {
+          const riskText = "当前环境有误，暂时无法回答你的问题，稍后再试试吧～"
+          sendServerFrame(socket, {
+            type: "event",
+            event: "ag_ui_event",
+            data: { event: "TEXT_MESSAGE_CONTENT", delta: riskText, messageId: "msg_risk2" },
+          })
+          setTimeout(() => {
+            sendServerFrame(socket, {
+              type: "event",
+              event: "conversation.status",
+              data: { status: "failed", error: riskText },
+            })
+          }, 20)
           return
         }
         // delta 逐帧间隔发送 —— 消费端必须能观察到「增量」而不是一次性
@@ -310,6 +332,43 @@ test("risk_control_blocked 以明确错误抛出，拦截文案不作为正文�
   await assert.rejects(() => collectStream(gatewayChatStream(CRED, PAYLOAD)), /risk_control_blocked/)
 })
 
+// ③c 风控只给 status=failed、不给 code：定性只能靠扣留的文案，绝不能漏成正文
+test("风控只报 status=failed（无 code）时也按风控抛错，拦截文案不外泄", { timeout: 30_000 }, async (t) => {
+  const gw = await startMockGateway()
+  gw.state.riskStatusOnly = true
+  t.after(() => gw.close())
+  withWsEnv(t, { MARVIS_GW_URL: `ws://127.0.0.1:${gw.port}/`, MARVIS_GATEWAY_TOKEN: "test-token" })
+
+  const got = []
+  await assert.rejects(
+    async () => {
+      for await (const f of gatewayChatStream(CRED, PAYLOAD)) got.push(f)
+    },
+    (err) => {
+      assert.equal(err.code, "risk_control_blocked", "必须带 code，上层 loader 才能回 429")
+      assert.match(err.message, /风控拦截/)
+      return true
+    },
+    "status=failed + 风控文案 也必须定性为风控",
+  )
+  const leaked = got.some((f) => /当前环境有误|暂时无法回答/.test(String(f.delta || "")))
+  assert.equal(leaked, false, "拦截文案不许作为 delta 流出")
+})
+
+// ③d 正常回复的第一段不许被扣留机制吞掉（回归：扣留只延迟，不丢帧）
+test("正常回复：第一段 delta 被短暂扣留后仍原样送达（不丢帧、不改序）", { timeout: 30_000 }, async (t) => {
+  const gw = await startMockGateway()
+  t.after(() => gw.close())
+  withWsEnv(t, { MARVIS_GW_URL: `ws://127.0.0.1:${gw.port}/`, MARVIS_GATEWAY_TOKEN: "test-token" })
+
+  const got = await collectStream(gatewayChatStream(CRED, PAYLOAD))
+  assert.deepEqual(
+    got.filter((x) => typeof x.frame.delta === "string").map((x) => x.frame.delta),
+    ["你", "好", "，", "世界"],
+  )
+  assert.deepEqual(got.at(-1).frame, { model: "mock-gateway-model" })
+})
+
 // ─────────────────────────────────────────────────────────────
 // ④ requestId 每请求唯一
 // ─────────────────────────────────────────────────────────────
@@ -445,4 +504,35 @@ test("loader 接线：relay + stream:true → chat.completion.chunk SSE 实时�
   const j = await res2.json()
   assert.equal(j.object, "chat.completion")
   assert.equal(j.choices[0].message.content, "你好，世界")
+})
+
+// ⑦ loader 接线：WS 通道的风控 → 429 risk_blocked + retry-after（不是 503 连不上网关）
+test("loader 接线：WS 风控 → 429 risk_blocked + retry-after，拦截文案不进 SSE", { timeout: 30_000 }, async (t) => {
+  const gw = await startMockGateway()
+  gw.state.riskBlocked = true
+  t.after(() => gw.close())
+  withWsEnv(t, {
+    MARVIS_TRANSPORT: "off",
+    MARVIS_GATEWAY_URL: "",
+    MARVIS_GATEWAY_KEY: "",
+    MARVIS_WS_MODE: "relay",
+    MARVIS_GW_URL: `ws://127.0.0.1:${gw.port}/`,
+    MARVIS_GATEWAY_TOKEN: "test-token",
+    MARVIS_NATIVE_DIR: mkdtempSync(join(tmpdir(), "marvis-risk-")),
+  })
+
+  const { loaderHook } = await import("../src/hooks/loader.mjs")
+  const describe = await loaderHook()(async () => AUTH)
+  for (const stream of [true, false]) {
+    const res = await describe.fetch("https://yybadaccess.3g.qq.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "main-auto", stream, messages: [{ role: "user", content: "你好" }] }),
+    })
+    assert.equal(res.status, 429, `stream=${stream}：风控必须回 429（让宿主按 retry-after 退避）`)
+    assert.ok(res.headers.get("retry-after"), "必须带 retry-after")
+    const body = await res.text()
+    assert.equal(/当前环境有误|暂时无法回答/.test(body), false, "拦截文案不许出现在响应体里")
+    assert.match(body, /risk_blocked|风控/)
+  }
 })

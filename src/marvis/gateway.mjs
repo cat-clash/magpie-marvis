@@ -133,22 +133,75 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
   }
   const endStream = () => {
     if (ended) return
+    flushHeld() // 正常收尾前把扣住的内容放出去，否则会吞掉真回复
     ended = true
     wake()
   }
   const failStream = (err) => {
     if (ended) return
+    dropHeld() // 风控 / 出错：扣住的拦截文案直接丢弃，绝不作为正文流出
     streamError = err instanceof Error ? err : new Error(String(err))
     ended = true
     wake()
   }
 
+  // ── 风控文案扣留（2026-11-25 直连 10123 实测的帧序）────────────────────
+  //   +496ms TEXT_MESSAGE_CONTENT delta="当前环境有误，暂时无法回答你的问题，稍后再试试吧～"
+  //   +513ms RUN_ERROR code=risk_control_blocked        ← 只晚 17ms
+  // 差值太小：delta 一到就 yield 的话，拦截文案必然已经流出去 —— 上层 loader 只
+  // 预取首帧，拿到文本就锁定 200，之后 RUN_ERROR 只能把流截断（表现为
+  // 「200 + 一句假回复 + 没有 finish_reason / [DONE]」）。
+  //
+  // 扣留规则（不牺牲流式）：
+  //   · 本轮**第一段** delta 先压住 —— 风控拦截永远是整轮的唯一一段文本，压住它
+  //     就等于压住拦截文案；正常回复在第二段 delta 到达时立刻放行（只差两个字之间
+  //     的间隔），上游真卡住时由 FIRST_HOLD_MAX_MS 兜底放行；
+  //   · 任何位置命中风控文案 → 压住并等定性；
+  //   · 终止信号（RUN_ERROR / finishReason / 会话 failed / RUN_FINISHED）→ 风控就
+  //     丢弃扣留内容并抛错，正常收尾就先把扣留内容放出去再结束。
+  const RISK_RE = /当前环境有误|暂时无法回答你的问题|risk_control_blocked/
+  const HOLD_MS = Number(process.env.MARVIS_RISK_HOLD_MS || 300)
+  const FIRST_HOLD_MAX_MS = Number(process.env.MARVIS_RISK_HOLD_FIRST_MS || 800)
+  /** @type {{delta?:string, model?:string}[]} */
+  let held = []
+  let holdTimer = null
+  let firstDeltaSeen = false
+  const dropHeld = () => {
+    clearTimeout(holdTimer)
+    holdTimer = null
+    held = []
+  }
+  const flushHeld = () => {
+    clearTimeout(holdTimer)
+    holdTimer = null
+    const out = held
+    held = []
+    for (const f of out) pushFrame(f)
+  }
+  /** 扣住的文本是不是风控拦截文案（上游有时只给 status=failed，不给 code） */
+  const heldLooksLikeRisk = () => held.some((f) => RISK_RE.test(String(f.delta || "")))
+  // code 让上层 loader 能认出来、回 429 risk_blocked（而不是「连不上网关」的 503）
+  const riskError = (detail) => {
+    const err = new Error(
+      "Marvis PC 客户端 agent 被风控拦截（risk_control_blocked，与 HTTP 直连的 4100404 同源）。" +
+        "换账号 / 换 IP 无效；改走 MARVIS_WS_MODE=remote（手机会话域）或本地 Python 网关。" +
+        `上游文案：${detail || "（未提供）"}`,
+    )
+    err.code = "risk_control_blocked"
+    return err
+  }
+
   let connectTimer = null
   let chatTimer = null
+  let graceTimer = null
 
   const cleanup = () => {
     clearTimeout(connectTimer)
     clearTimeout(chatTimer)
+    clearTimeout(holdTimer)
+    clearTimeout(graceTimer)
+    holdTimer = null
+    graceTimer = null
     try {
       ws.close()
     } catch {
@@ -204,7 +257,7 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
         return
       }
       chatTimer = setTimeout(() => {
-        if (anyDelta) endStream()
+        if (anyDelta || held.length) endStream()
         else failStream(new Error(`agent.run 超时（${timeout}ms 没有产出文本）`))
       }, timeout)
       return
@@ -235,14 +288,9 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
       if (evName === "RUN_ERROR") {
         const code = String(d.code || "")
         if (code === "risk_control_blocked") {
-          // 风控文案不算产出文本：把它从累计里剥掉（见 pushFrame 记录的 riskBlock 前缀）
-          failStream(
-            new Error(
-              "Marvis PC 客户端 agent 被风控拦截（risk_control_blocked，与 HTTP 直连的 4100404 同源）。" +
-                "换账号 / 换 IP 无效；改走 MARVIS_WS_MODE=remote（手机会话域）或本地 Python 网关。" +
-                `上游文案：${d.message || ""}`,
-            ),
-          )
+          // 风控文案不算产出文本：held 里的拦截文案随 failStream 一起丢弃
+          clearTimeout(graceTimer)
+          failStream(riskError(d.message))
           return
         }
         failStream(new Error(`agent 运行出错：${d.message || d.error || d.code || "unknown"}`))
@@ -253,25 +301,47 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
       if (evName === "CUSTOM" && String(d.name || "") === "message_complete") {
         const reason = String(d.value?.metadata?.finishReason || "")
         if (reason === "risk_control_blocked") {
-          failStream(
-            new Error(
-              "Marvis PC 客户端 agent 被风控拦截（message_complete.finishReason=risk_control_blocked）。" +
-                "与 HTTP 直连的 4100404 同源；改走 MARVIS_WS_MODE=remote（手机会话域）或本地 Python 网关。",
-            ),
-          )
+          clearTimeout(graceTimer)
+          failStream(riskError(`message_complete.finishReason=${reason}`))
           return
         }
       }
 
       const hasModel = Boolean(d.model)
       if (typeof d.delta === "string" && d.delta) {
-        pushFrame({ delta: d.delta, ...(hasModel ? { model: d.model } : {}) })
+        const frame = { delta: d.delta, ...(hasModel ? { model: d.model } : {}) }
+        const hitRisk = RISK_RE.test(d.delta)
+        if (hitRisk) {
+          // 命中拦截文案：压住，等 RUN_ERROR / status 来定性
+          clearTimeout(holdTimer)
+          holdTimer = setTimeout(flushHeld, HOLD_MS)
+          held.push(frame)
+          return
+        }
+        if (!firstDeltaSeen) {
+          // 本轮第一段：可能是拦截文案的另一种措辞 —— 压住，等下一段或终止信号
+          firstDeltaSeen = true
+          clearTimeout(holdTimer)
+          holdTimer = setTimeout(flushHeld, FIRST_HOLD_MAX_MS)
+          held.push(frame)
+          return
+        }
+        if (held.length) {
+          // 第二段到了 ⇒ 第一段不是一次性拦截文案，立刻放行（不改变流式观感）
+          held.push(frame)
+          flushHeld()
+          return
+        }
+        pushFrame(frame)
       } else if (hasModel) {
-        // 无 delta 的帧（RUN_FINISHED 等）单独带 model 一帧，聚合 wrapper 才能拿到
+        // 无 delta 的帧（RUN_FINISHED 等）单独带 model 一帧，聚合 wrapper 才能拿到。
+        // 扣住的文本排在它前面放出去 —— 顺序必须还是「先文本、后 model」。
+        flushHeld()
         pushFrame({ model: d.model })
       }
       if (evName === "RUN_FINISHED") {
-        if (anyDelta) endStream()
+        // held 里可能还压着「被疑似风控文案连坐」的正常内容：算作有产出
+        if (anyDelta || held.length) endStream()
         else failStream(new Error("agent.run 结束但没有返回文本（PC 端模型调用可能被 4100404 风控）"))
       }
       return
@@ -284,6 +354,14 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
         // 诊断要看到**完整**的会话数据：失败原因常藏在 error / message 字段里，
         // 截断会把关键信息切掉（实测只看到 status/updated_at，原因丢了）。
         const detail = String(JSON.stringify(msg.data)).slice(0, 800)
+        if (heldLooksLikeRisk()) {
+          // 实测帧序：风控文案 delta(+496) → status failed(+450 前后) → RUN_ERROR(+513)。
+          // status 帧不带 code，直接报它会丢掉「风控」这层定性；给 RUN_ERROR 一个
+          // 很短的抢先窗口，没等到就按扣留的文案自行定性。
+          clearTimeout(graceTimer)
+          graceTimer = setTimeout(() => failStream(riskError(held.map((f) => f.delta).join(""))), 150)
+          return
+        }
         failStream(new Error(`会话状态 ${st}：${detail}`))
       }
     }
@@ -292,7 +370,7 @@ export async function* gatewayChatStream(creds, payload, { signal } = {}) {
   ws.onerror = () => failStream(new Error(`本地网关 WebSocket 错误（${maskUrl(url)}）\n${relayHint(url)}`))
   ws.onclose = () => {
     if (ended) return
-    if (anyDelta) endStream()
+    if (anyDelta || held.length) endStream()
     else failStream(new Error("本地网关在返回文本前关闭了连接"))
   }
   signal?.addEventListener?.("abort", () => failStream(new Error("请求已取消")), { once: true })

@@ -1,5 +1,27 @@
 # 更新记录
 
+## 0.8.3 — 2026-11-25
+
+**风控文案扣留：WS 通道的拦截文案不再伪装成正文；`risk_control_blocked` 与 HTTP 4100404 同口径回 429**
+
+- **修复（WS 通道风控拦截文案当正文流出）**：2026-11-25 直连 PC 客户端 10123 实测帧序 ——
+  拦截文案 delta（+496ms）与 `RUN_ERROR code=risk_control_blocked`（+513ms）只差 ~17ms；delta 一到就
+  yield 的话，loader 只预取首帧、拿到文本就锁定 200，之后 RUN_ERROR 只能把流截断，表现为
+  「200 + 一句『当前环境有误…』假回复 + 没有 finish_reason / [DONE]」。
+  现在 `gatewayChatStream` 对本轮**第一段** delta 做短暂扣留（`MARVIS_RISK_HOLD_FIRST_MS`，默认 800ms
+  兜底放行）：第二段到达立即放行（正常流式只差两个字符的间隔，观感不变）；命中风控文案（`RISK_RE`）
+  或终止信号定性为风控时，扣留内容随 `failStream` 直接丢弃，绝不作为正文流出。`status=failed` 不带
+  code 的形态也按扣留文案自行定性（150ms grace 窗口等 RUN_ERROR 抢先）。错误统一带
+  `err.code = "risk_control_blocked"`。真机复验：`THROW code=risk_control_blocked / textFrames=0 / leaked=false`。
+- **修复（WS 风控被当网络故障连撞 7 次）**：loader catch 现在识别 `err.code === "risk_control_blocked"`，
+  走 `riskResponse("risk_blocked", …)` —— 与 HTTP 直连 4100404 同口径回 **429 + retry-after**，并计入
+  当前账号的熔断（0.8.0 起的账号分桶照常生效）—— 不再落进 503 upstream_unreachable 让宿主按默认
+  策略连试 7 次把冷却越撞越长（issue #71 同源）。
+- **回归测试**：`tests/gateway-stream.test.mjs` 10 → 13 条 —— `status=failed` 无 code 也定性风控、
+  正常回复第一段扣留后原样送达（不丢帧）、loader 接线 WS 风控 → 429 + retry-after（stream true/false
+  双测，拦截文案不进响应体）。逐文件隔离全量对比基线：本补丁还顺带修好了
+  `loader-model-support` 里 18 条原先失败的用例（它们期待的正是这个 429 分支），其余失败与基线完全一致。
+
 ## 0.8.2 — 2026-11-25
 
 - **429 配置自检：揪出「环境变量覆盖配置文件」这个隐藏根因**（真实踩坑）：`openclaw.json` 写了

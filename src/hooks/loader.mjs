@@ -839,6 +839,25 @@ export function loaderHook(input, options = {}) {
           if (err instanceof HeaderUnavailable) {
             return errorResponse(503, "header_unavailable", `请求头构造失败：${err.message}`)
           }
+          // WS 通道（relay / remote）把上游 risk_control_blocked 当错误抛出 ——
+          // 那不是「连不上网关」，是上游风控；必须按 HTTP 侧 4100404 同样的口径回
+          // 429 + retry-after，否则宿主会把它当网络故障连试 7 次，把冷却越撞越长
+          // （issue #71）。relay 已经是最绕开 HTTP 的路线，再提示「切 relay」是废话：
+          // 这里只说清楚「PC 客户端会话域也被同一个风控拦住」和真正的两条出路。
+          // 拦截文案已在 gatewayChatStream 扣留丢弃，不会出现在 message 里。
+          if (String(err?.code || "") === "risk_control_blocked") {
+            breaker.record(false)
+            const retryAfterSec = Math.max(1, Math.ceil(breaker.retryAfterMs / 1000) || 60)
+            return riskResponse(
+              "risk_blocked",
+              "上游风控拦截（Marvis PC 客户端 WS 通道）：agent.run 被 risk_control_blocked 拦下，"
+                + "与 HTTP 直连的 4100404 同源，换账号 / 换 IP 都无效。"
+                + "可行出路只有两条：① 手机会话域 MARVIS_WS_MODE=remote + MARVIS_HANDSHAKE=<handshake.log>；"
+                + "② 本地 Python 网关（8088）。自检：node scripts/cli.mjs doctor。"
+                + `原始返回：${String(err?.message ?? err).slice(0, 400)}`,
+              retryAfterSec,
+            )
+          }
           // 0.7.7：连接失败（最常见的就是手机 openclaw WS 连 PC 10123 端口）
           // 以前只甩一句「连不上」，用户不知道下一步做什么。这里补一条**能直接执行**的诊断：
           // 手机上指向本地 8088 网关的 diag.sh --fix；桌面上指向 PC 客户端/WS_MODE 出路。
