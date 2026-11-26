@@ -186,18 +186,18 @@ export const FIRST_LINE_OPTION_KEY = "提示词首行替换"
 export const PLUGIN_OPTIONS = Object.freeze([
   Object.freeze({
     key: "first_line_fallback",
-    label: "Rewrite the first line when the upstream refuses it (403)",
+    label: "Rewrite first line when upstream refuses (403)",
     labels: {
-      zh: "被上游拒绝时改写首行（403 时兜底重发）",
-      "zh-TW": "被上游拒絕時改寫首行（403 時兜底重發）",
+      zh: "拒绝时兜底改首行（403）",
+      "zh-TW": "拒絕時兜底改首行（403）",
     },
     default: true,
     placement: "top",
   }),
   Object.freeze({
     key: "first_line_always",
-    label: "Rewrite the first line of every request",
-    labels: { zh: "每个请求都改写首行（文本在「选项」里）" },
+    label: "Rewrite first line of every request",
+    labels: { zh: "每个请求都改首行" },
     default: false,
     placement: "top",
     confirm: "Every request will have its system prompt's first line replaced, including the ones that would work as they are.",

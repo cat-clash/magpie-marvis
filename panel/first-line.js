@@ -22,7 +22,7 @@
       title: "首行文本",
       hint: "「每个请求都改写首行」打开时，system 提示词的第一行会换成下面这句。",
       note: `留空 = ${FALLBACK}（不含任何 agent 产品名）`,
-      empty: "（内置兜底句）",
+      empty: "内置兜底句",
       cancel: "取消",
       save: "保存",
       done: "已保存 · 下一个请求起生效",
@@ -35,7 +35,7 @@
       title: "First line text",
       hint: "With “every request” on, the system prompt's first line becomes this one.",
       note: `Empty = ${FALLBACK} (no agent product name in it)`,
-      empty: "(the built-in fallback)",
+      empty: "built-in fallback",
       cancel: "Cancel",
       save: "Save",
       done: "Saved · takes effect on the next request",
@@ -48,7 +48,7 @@
 
   const lang = String(magpie.theme?.lang || document.documentElement.lang || "en").toLowerCase()
   const t = STRINGS[lang.startsWith("zh") ? "zh" : "en"]
-  $("label").textContent = t.label
+  // 字段名由宿主按 panels.title 渲染 —— 面板里不再重复写 label（会和宿主标签重叠）
   $("open").textContent = t.open
   $("title").textContent = t.title
   $("text-label") && ($("text-label").textContent = t.label)
