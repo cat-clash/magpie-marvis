@@ -1,3 +1,12 @@
+## 0.8.7 — 2026-11-27
+
+**根因：PC 4100404 不是设备拉黑，是 HTTP 直连风控；绕开 HTTP 走 PC 客户端 WS 网关（10123）即可**
+
+- **核心发现**：PC 客户端走 ws://127.0.0.1:10123 本地 WS 网关（qimei36 由 MarvisHost 进程持有，init success=true, q36 length=36），不走 HTTP 直连；HTTP 直连才触 4100404。插件自动探测失败前会回落 HTTP，导致误判“设备被拉黑”。
+- **修复**：openclaw.json 写 {"mode":"relay","relayUrl":"ws://127.0.0.1:10123/"}，强制走 PC 客户端 WS 网关，实测 chat 1181ms 全链路通（纯配置驱动，不依赖环境变量）。
+- **doctor 新增 [5/4] openclaw relay 检查**：探测 openclawStatus() 模式 + 10123 端口 TCP 可达性；MARVIS_WS_MODE=off 时直接标记为 fail 并给出“改回 relay”的修复提示，避免用户被 4100404 带偏。
+- **前提**：PC Marvis 客户端必须运行（10123 在监听）；客户端关闭后 relay 断，插件会回落 HTTP。
+
 # 更新记录
 
 ## 0.8.5 — 2026-11-26

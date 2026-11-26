@@ -3,10 +3,12 @@
 // 只读环境变量 / 本地文件；网络探测只发最小请求。绝不打印 key / qimei36 明文。
 // 风格对齐 scripts/probe-gateway.mjs：逐环 ✓/✗ + 修复提示 + 总结 exit code。
 
+import { createConnection } from "node:net"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { directFetch } from "../src/marvis/directnet.mjs"
+import { openclawStatus } from "../src/marvis/openclaw.mjs"
 import { gatewayConfig, gatewayFileConfig, localGatewayEnabled, nativeDir } from "../src/marvis/localgateway.mjs"
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -194,6 +196,36 @@ if (!modelsOk || !modelId) {
     bad("chat 探测", `连接失败：${err?.message ?? err}`,
       "网关没起，sh run.sh start（Windows：marvis.bat bg / run-local.bat）", 6)
   }
+}
+
+// ── openclaw relay（PC 客户端 WS 网关）诊断 ──────────────────────────────────
+console.log()
+console.log("[5/4] openclaw relay（PC 客户端 WS 网关）")
+const wsStatus = openclawStatus()
+const wsMode = wsStatus.mode
+const wsUrl = wsStatus.url || (wsMode === "remote" ? "wss://(handshake required)" : "ws://127.0.0.1:10123/")
+console.log(`  mode=${wsMode} url=${wsUrl}`)
+
+function probeTcpPort(host, port, timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    const sock = createConnection({ host, port })
+    sock.setTimeout(timeoutMs)
+    sock.once("connect", () => { sock.destroy(); resolve(true) })
+    sock.once("error", () => resolve(false))
+    sock.once("timeout", () => { sock.destroy(); resolve(false) })
+  })
+}
+
+const wsReachable = wsMode !== "off" ? await probeTcpPort("127.0.0.1", wsStatus.port ?? 10123) : null
+
+if (wsMode === "off") {
+  bad("openclaw relay", "MARVIS_WS_MODE=off → 强制走 HTTP 直连，必触 4100404", "改回 relay：echo '{\"mode\":\"relay\",\"relayUrl\":\"ws://127.0.0.1:10123/\"}' > ~/.magpie-marvis-native/openclaw.json", 10)
+} else if (wsMode === "remote") {
+  info("openclaw relay", "remote 模式需 handshake，不依赖 10123")
+} else if (wsReachable === true) {
+  ok("openclaw relay", "127.0.0.1:10123 可达（Marvis PC 客户端在运行）")
+} else {
+  bad("openclaw relay", "127.0.0.1:10123 不可达（Marvis PC 客户端未启动或未登录）", "先启动 PC 客户端并登录，确保 10123 在监听；或改 remote 模式并提供 MARVIS_HANDSHAKE", 20)
 }
 
 // ── 总结 ─────────────────────────────────────────────────────────────────
