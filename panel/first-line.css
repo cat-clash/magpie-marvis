@@ -12,26 +12,44 @@
   line-height: 1.2;
 }
 
-/* 按钮本身就是「当前值 + ›」：整行可点，宽度自适应内容并截断长句 */
+/* 按钮做成「一行文字链接」：没有边框、没有背景、没有 padding，
+   高度严格等于字号（12px），比宿主给的那块还矮，绝不可能顶到下一行。
+   实测：带边框/padding 的方块按钮（≈28px）会压到「高级」上。 */
 .fl-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   max-width: 100%;
   min-width: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
   font: inherit;
   font-size: 12px;
-  line-height: 1.2;
-  padding: 3px 8px;
-  border: 1px solid var(--magpie-line, #3a3a3a);
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
+  line-height: 1;
+  color: var(--magpie-muted, #888);
   cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
 }
 
 .fl-btn:hover {
+  color: var(--magpie-fg, inherit);
+  text-decoration-style: solid;
+}
+
+/* 对话框里的按钮要保留方块样式（那里不受高度限制） */
+dialog .fl-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--magpie-line, #3a3a3a);
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+  line-height: 1.2;
+}
+
+dialog .fl-btn:hover {
   background: var(--magpie-hover, rgba(127, 127, 127, 0.14));
 }
 
