@@ -31,7 +31,10 @@ function panelFiles(panel) {
 }
 
 test("magpie.panels 形状合法：slot 在允许集合里、file 存在", () => {
-  assert.ok(Array.isArray(panels) && panels.length > 0, "面板清单不能空")
+  // 0.9.2 起**允许为空**：宿主给 provider 面板的高度只够一行且不参与布局计算，
+  // 任何面板内容都会压到下面的「高级」上（多轮截图实测）。首行文本因此改在
+  // 插件选项 JSON（`{"提示词首行替换": "..."}`）里配置，不再声明面板。
+  assert.ok(Array.isArray(panels), "面板清单必须是数组（可为空）")
   assert.ok(panels.length <= 8, "magpie 一个插件最多 8 个面板")
   for (const p of panels) {
     assert.ok(SLOTS.has(p.slot), `slot 必须是 ${[...SLOTS].join(" / ")}，收到 ${p.slot}`)
@@ -42,6 +45,7 @@ test("magpie.panels 形状合法：slot 在允许集合里、file 存在", () =>
 })
 
 test("面板要出现在供应商卡片里（slot: provider）", () => {
+  if (panels.length === 0) return // 未声明面板：首行文本走插件选项 JSON
   assert.ok(panels.some((p) => p.slot === "provider"), "文本框要挂在 provider 编辑器上")
 })
 

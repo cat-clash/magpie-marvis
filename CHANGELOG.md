@@ -1,3 +1,19 @@
+## 0.9.2 — 2026-11-27
+
+**删掉「首行文本」面板（宿主布局撑不下）+ 修正令牌额度文案**
+
+- **删面板**（package.json 的 magpie.panels → []）：多轮截图证实宿主给 provider 面板的
+  高度只够一行，且不把面板高度计入布局 —— 任何面板内容都会压到下面的「高级」折叠行上。
+  换边框、换字号、压成文字链都治不好。首行文本改在**插件选项 JSON** 里配置：
+  {"提示词首行替换": "你的首行文本"}（optionsExample 已给示例）。那一行彻底消失。
+  	ests/panel-manifest.test.mjs 同步放宽为「允许 panels 为空数组」。
+- **令牌额度文案**（src/hooks/usage.mjs）：实测上游 /v3/marvis_get_wallet 返回
+  {"total_tokens":"10000000","used_tokens":"0",...} —— 这 1000 万是营销额度，实际请求
+  走免费通道、不扣令牌。照实显示会被误读成「额度没生效」，现在 used=0 时显示
+  共 10,000,000 tokens（上游未扣减）；有真实消耗时仍显示 X 可用 / 共 Y。
+- **修 ecordFailure 的 equire bug**：ESM 模块里 equire 未定义，被 try/catch 吞掉，
+  钱包读取失败时诊断文件永远写不出来。改为顶部 import { mkdirSync, writeFileSync }。
+
 ## 0.9.0 — 2026-11-27
 
 **「首行文本」面板压成一行按钮：彻底解决与「高级」行重叠**

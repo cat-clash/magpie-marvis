@@ -8,6 +8,10 @@
 //   它会拦下：缺 used、aside 带 amount/limit、时间不是 ISO —— 这五类写法不会抛错，
 //   只会让卡片显示「剩余额度未知」，而这个号在智能路由里等于不存在（HOOKS §三）。
 
+import { mkdirSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+
 import { usage as buildUsage, usageWindow } from "../quota.mjs"
 import { businessHeaders } from "../marvis/protocol.mjs"
 import { directFetch } from "../marvis/directnet.mjs"
@@ -43,9 +47,6 @@ export function nextResetAt(now = new Date()) {
  */
 function recordFailure(err) {
   try {
-    const { mkdirSync, writeFileSync } = require("node:fs")
-    const { homedir } = require("node:os")
-    const { join } = require("node:path")
     const dir = join(homedir(), ".cache", "magpie")
     mkdirSync(dir, { recursive: true })
     writeFileSync(
@@ -100,13 +101,22 @@ export function usageHook() {
       plan: "Marvis 令牌",
       windows: [
         // 主窗口：数量型（amount + limit）。路由排序读的就是它。
+        //
+        // ⚠ 上游 `used_tokens` 实测**恒为 0**（2026-11-27 原始响应：
+        //   {"total_tokens":"10000000","used_tokens":"0","frozen_tokens":"0","avail_tokens":"10000000"}）。
+        //   这 1000 万是营销额度，实际请求走免费通道、不从这里扣。
+        //   照实显示 `10,000,000 / 10,000,000 · 剩余 100%` 会让人误以为「额度没生效」，
+        //   所以 used=0 时改成说明性文案，不再暗示有真实消耗。
         usageWindow({
           name: "令牌用量",
           amount: used,
           limit: total,
           unit: "tokens",
           resetsAt: nextResetAt(),
-          display: `${fmt(avail)} 可用 / 共 ${fmt(total)}`,
+          display:
+            used > 0
+              ? `${fmt(avail)} 可用 / 共 ${fmt(total)}`
+              : `共 ${fmt(total)} tokens（上游未扣减）`,
         }),
         // 冻结额度单独一条，只上卡片（不影响路由）
         ...(frozen > 0
