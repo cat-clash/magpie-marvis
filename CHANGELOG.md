@@ -1,3 +1,29 @@
+## 0.8.8 — 2026-11-27
+
+**并发默认降到 1：把多账号/高频突发的 4100404 风险压到最低**
+
+- **改**：package.json 的 magpie.maxConcurrency 由 8 改为 **1**。
+  腾讯的 4100404 是账号级自适应风控，看的是**请求节奏分布**：并发 8 时同一时间窗内
+  多个请求会被画成自动化尖峰，触发后冷却时间还会被后续重试拉长（issue #71 同源）。
+  串行 + pacing（默认 800ms 间隔 / 400ms 抖动）+ breaker（默认 5 次触发 30min 冷却）
+  三者配合，才把"像人"的节奏守住。
+- **说明**：maxConcurrency=1 不是性能退化 —— 上游对同一设备的并行本来就不友好；
+  需要更高吞吐时应走多账号 + MARVIS_PACING_SCOPE=account（每号独立时间轴），
+  而不是提高单设备并发。
+- 可调：需要临时放开时改 package.json 的 maxConcurrency（不改代码逻辑）。
+
+### 动态模型（`MARVIS_DYNAMIC_MODELS=1`）
+
+- **实测**：上游直连 `https://yybadaccess.3g.qq.com/v1/models` 一律 **404**（腾讯没有列模型接口）；
+  本地 8088 网关 `/v1/models` 返回 **200 + 真实清单**（实测 7 个：`deepseek-v4-1-flash-261017`、
+  `deepseek-v4-pro-external`、`deepseek-v4-flash-202605`、`deepseek-v4-flash-ga-260731`、
+  `hy3`、`HY-Vision-2.0-instruct`、`marvis-vision`）。
+- **实现**（`src/hooks/models.mjs`）：`MARVIS_DYNAMIC_MODELS=1` 时，第一次调用 models 钩子
+  从网关 `/models` 拉取；结果缓存 1 小时；拉不到（网关未启动 / 直连上游 / 网络错误）回落静态表。
+  **默认关闭**——直连模式下静态表就是唯一权威，不改变现有行为。
+- 可调：`MARVIS_GATEWAY_URL` 改网关基址（默认 `http://127.0.0.1:8088/v1`）。
+- 边界：动态清单只反映**网关**侧的模型目录；上游本身没有列模型能力，直连时无法动态发现。
+
 ## 0.8.7 — 2026-11-27
 
 **根因：PC 4100404 不是设备拉黑，是 HTTP 直连风控；绕开 HTTP 走 PC 客户端 WS 网关（10123）即可**
