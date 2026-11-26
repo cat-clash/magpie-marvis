@@ -2,6 +2,14 @@ process.env.MARVIS_WS_MODE ||= "off"
 // 宿主机可能带着 MARVIS_* 真实配置跑 magpie —— 测试必须与宿主环境隔离
 //（直连通道回退 fetch，才能吃到下方 mock 的 globalThis.fetch）
 process.env.MARVIS_DIRECT_TRANSPORT ??= "fetch"
+// 本文件连续快速断言 8+ 个模型，默认 pacing（800ms + 400ms 抖动）会让单测 5s 超时。
+// 测试关掉节奏闸；生产路径的节奏由 src/pacing.mjs 负责，与本文件的改写/分流断言无关。
+process.env.MARVIS_MIN_REQUEST_INTERVAL_MS = "0"
+process.env.MARVIS_REQUEST_JITTER_MS = "0"
+// 排除宿主机上真实 Marvis 客户端的 relay 端口（10123）—— 否则 4100404 文案会
+// 因本机 relay 可达而改指 relay，导致「要指路手机会话域 remote」断言失败。
+process.env.MARVIS_LOCAL_WS = "ws://127.0.0.1:59999"
+process.env.MARVIS_RISK_AUTO_WS = "0"
 // 0.5.4 起 uskey 出票默认 fail-fast：本文件只测请求改写 / 错误分流（断言不涉及
 // uskey 值），显式 opt-in 随机 uskey 让 llmHeaders 在无 native 的离线环境可用
 process.env.MARVIS_ALLOW_RANDOM_USKEY = "1"

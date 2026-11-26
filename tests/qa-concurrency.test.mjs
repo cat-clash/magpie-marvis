@@ -8,7 +8,7 @@
 //   E. pacing 多 key 并发：A 账号等待不阻塞 B 账号
 //
 // 跑法（runner 由 QA 指定）：
-//   $bun = "C:\Users\c\.cache\magpie\bun\1.4.5\magpie-bun.exe"
+//   $bun = Join-Path $env:USERPROFILE ".cache\magpie\bun\1.4.5\magpie-bun.exe"
 //   $env:MARVIS_MIN_REQUEST_INTERVAL_MS="0"; $env:MARVIS_REQUEST_JITTER_MS="0"; & $bun test tests/qa-concurrency.test.mjs
 
 import { test } from "node:test"

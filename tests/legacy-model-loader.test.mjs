@@ -2,6 +2,11 @@ process.env.MARVIS_WS_MODE ||= "off"
 // 宿主机可能带着 MARVIS_* 真实配置跑 magpie —— 测试必须与宿主环境隔离
 //（直连通道回退 fetch，loader 的出网请求才能吃到下方 mock 的 globalThis.fetch）
 process.env.MARVIS_DIRECT_TRANSPORT ??= "fetch"
+// 本文件连续断言 8 个模型，默认 pacing（800ms+400ms 抖动）会 5s 超时；测试关掉节奏闸。
+process.env.MARVIS_MIN_REQUEST_INTERVAL_MS = "0"
+process.env.MARVIS_REQUEST_JITTER_MS = "0"
+process.env.MARVIS_LOCAL_WS = "ws://127.0.0.1:59999"
+process.env.MARVIS_RISK_AUTO_WS = "0"
 // 0.5.4 起 uskey 出票默认 fail-fast：本文件只测模型闸 / 出网次数（断言不涉及
 // uskey 值），显式 opt-in 随机 uskey 让 llmHeaders 在无 native 的离线环境可用
 process.env.MARVIS_ALLOW_RANDOM_USKEY = "1"

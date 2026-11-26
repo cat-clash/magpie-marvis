@@ -2,7 +2,7 @@
 
 > 生成时间：2026-11-26
 > 基线：cat-clash/magpie-marvis `main` @ `9e497da`（0.8.3）
-> 工作副本：`C:\Users\c\Documents\deepseek-harness\default-workspace\magpie-marvis-083-opt`
+> 工作副本：`default-workspace/magpie-marvis-083-opt`（相对工作区根目录）
 > 干净基线副本：`...\magpie-marvis-083-base`（同一 commit，未改动，用于回滚对照）
 
 ---

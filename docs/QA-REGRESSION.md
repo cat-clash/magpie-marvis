@@ -3,7 +3,7 @@
 - 测试时间：2026-11-26 07:32–07:45 (Asia/Shanghai)
 - 工作目录（0.8.4）：`qa-regression`（worktree，HEAD=`8b6a6a1 release: 0.8.4`）
 - 对照版本（0.8.3）：`magpie-marvis-083-base`（HEAD=`9e497da`）
-- 运行器：`C:\Users\c\.cache\magpie\bun\1.4.5\magpie-bun.exe`（v1.4.5）
+- 运行器：`~/.cache/magpie/bun/1.4.5/magpie-bun.exe`（v1.4.5；Windows 下即 `%USERPROFILE%\.cache\magpie\bun\1.4.5\magpie-bun.exe`）
 - 两目录**串行**执行；`MARVIS_MIN_REQUEST_INTERVAL_MS=0`、`MARVIS_REQUEST_JITTER_MS=0`
 
 ## 结论总览
@@ -143,7 +143,7 @@
 ## 附：复现命令
 
 ```powershell
-$bun="C:\Users\c\.cache\magpie\bun\1.4.5\magpie-bun.exe"
+$bun=Join-Path $env:USERPROFILE ".cache\magpie\bun\1.4.5\magpie-bun.exe"
 $env:MARVIS_MIN_REQUEST_INTERVAL_MS="0"; $env:MARVIS_REQUEST_JITTER_MS="0"
 $env:MARVIS_LOCAL_WS="ws://127.0.0.1:59999"   # 若本机 10123 有 relay 监听，隔离探针
 # 在 qa-regression 与 magpie-marvis-083-base 目录分别串行执行：
