@@ -48,8 +48,7 @@
 
   const lang = String(magpie.theme?.lang || document.documentElement.lang || "en").toLowerCase()
   const t = STRINGS[lang.startsWith("zh") ? "zh" : "en"]
-  // 字段名由宿主按 panels.title 渲染 —— 面板里不再重复写 label（会和宿主标签重叠）
-  $("open").textContent = t.open
+  // 字段名由宿主按 panels.title 渲染；按钮内只有「值 + ›」，不能被文案覆盖
   $("title").textContent = t.title
   $("text-label") && ($("text-label").textContent = t.label)
   $("hint").textContent = t.hint
@@ -82,7 +81,9 @@
   const paint = () => {
     const v = textOf(opts)
     row.textContent = v || t.empty
-    row.title = v || ""
+    // 完整文本挂在按钮 title 上：按钮宽度有限，长句会被截断
+    const btn = $("open")
+    if (btn) btn.title = v || t.note
   }
 
   await readOpts()

@@ -1,31 +1,29 @@
-/* 首行文本面板 —— 一行一个按钮；输入框只在弹出的对话框里。
-   颜色/字体/输入框交给 bridge 的 :where() 基础样式，深色/浅色与语言切换自动跟随 magpie。 */
+/* 首行文本面板 —— 只有一个按钮，高度恒为一行。
+ *
+ * ⚠ 宿主给「首行文本」这一块的高度只有**一行**：面板里多出任何一行
+ *   （第二个 label、状态行、padding）都会把下面的「高级」挤上来重叠。
+ *   所以这里不写 value 区块、不写固定 min-height、不做上下 padding。
+ *
+ * 颜色/字体交给 bridge 的 :where() 基础样式，深浅色自动跟随 magpie。 */
 
 .fl {
-  padding: 2px 0 4px;
+  padding: 0;
+  margin: 0;
+  line-height: 1.2;
 }
 
-.fl-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.fl-value {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--magpie-muted, #888);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* 按钮本身就是「当前值 + ›」：整行可点，宽度自适应内容并截断长句 */
 .fl-btn {
-  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
   font: inherit;
   font-size: 12px;
-  padding: 4px 10px;
+  line-height: 1.2;
+  padding: 3px 8px;
   border: 1px solid var(--magpie-line, #3a3a3a);
   border-radius: 6px;
   background: transparent;
@@ -37,19 +35,37 @@
   background: var(--magpie-hover, rgba(127, 127, 127, 0.14));
 }
 
+/* 值：单行省略，不换行（换行就等于多占一行高度） */
+.fl-btn #value {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fl-chevron {
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+
 .fl-primary {
   border-color: var(--magpie-accent, #4c8dff);
   color: var(--magpie-accent, #4c8dff);
 }
 
+/* 状态行：只有「已保存 / 保存失败」时才存在，空着时完全不占高度 */
 .fl-status {
-  margin: 4px 0 0;
-  min-height: 14px;
+  margin: 0;
+  padding: 0;
   font-size: 11px;
   color: var(--magpie-green, #3ba55d);
 }
 
-/* 对话框：点「设置…」才出现，面板本身不占高度 */
+.fl-status:empty {
+  display: none;
+}
+
+/* 对话框：点按钮才出现，不影响卡片里的一行高度 */
 .fl-dialog {
   width: min(520px, calc(100vw - 48px));
   border: 1px solid var(--magpie-line, #3a3a3a);

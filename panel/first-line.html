@@ -9,20 +9,20 @@
 </head>
 <body>
 
-<!-- 一行：当前值 · 「设置…」按钮。字段名由宿主按 panels.title 渲染，面板内不再重复。
-     点按钮才弹出输入框，面板本身不占高度。 -->
+<!-- 只占一行、只放一个按钮：按钮文字就是当前值（空值显示「内置兜底句」）。
+     字段名由宿主按 panels.title 渲染；面板内不再有第二行文字 ——
+     宿主给这块的高度只有一行，多任何一行都会把下面的「高级」挤重叠。 -->
 <section class="fl">
-  <div class="fl-row">
-    <span class="fl-value" id="value">—</span>
-    <button id="open" class="fl-btn" type="button">设置…</button>
-  </div>
+  <button id="open" class="fl-btn" type="button" aria-haspopup="dialog">
+    <span id="value">—</span><span class="fl-chevron" aria-hidden="true">›</span>
+  </button>
   <p class="fl-status" id="saved" role="status" aria-live="polite"></p>
 
   <dialog id="dlg" class="fl-dialog">
     <form id="form" method="dialog" class="fl-form">
       <h2 id="title">首行文本</h2>
       <p class="muted" id="hint">
-        「每个请求都改写首行」打开时，system 提示词的第一行会换成下面这句。留空 = 内置兜底句。
+        「每个请求都改首行」打开时，system 提示词的第一行会换成下面这句。留空 = 内置兜底句。
       </p>
       <input id="text" type="text" spellcheck="false" autocomplete="off">
       <p class="muted" id="fallback-note"></p>
