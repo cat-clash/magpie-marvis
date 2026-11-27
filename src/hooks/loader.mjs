@@ -456,6 +456,45 @@ function systemFirstLineOf(bodyString) {
   return firstLineInBody(json)
 }
 
+/**
+ * 0.9.7：reasoning_effort 思考档的 max_tokens 预算下限补偿（文档第九节）。
+ *
+ * 实测：reasoning_effort=max 时模型先思考 3-4 万 token，
+ *   max_tokens=16000 → 上游 502 空正文（"cut at its length, the whole output
+ *   spent on reasoning"）；≥64000 → 200 正常返回。
+ *
+ * 规则：
+ *   · effort 为 max（或 high 且预算 < 64000）→ 把 max_tokens /
+ *     max_completion_tokens 抬到 64000；
+ *   · 用户显式给了 ≥64000 就不动；
+ *   · MARVIS_MAX_TOKENS_FLOOR=0 可整体关闭。
+ *
+ * @param {Record<string, any>} json 请求体对象（就地修改）
+ * @returns {boolean} 是否发生改写
+ */
+export function applyReasoningBudgetFloor(json) {
+  if (!json || typeof json !== "object") return false
+  if (String(process.env.MARVIS_MAX_TOKENS_FLOOR ?? "").trim() === "0") return false
+  const effort = String(json.reasoning_effort ?? json.reasoning ?? "").toLowerCase()
+  if (effort !== "max" && effort !== "high") return false
+  let changed = false
+  // 只抬用户**实际给出**的预算字段：两个都没给且 effort=max 时补一个
+  // max_tokens=64000（没预算照样 502）；high 档没给预算就不动（交给上游默认）。
+  const keys = ["max_tokens", "max_completion_tokens"].filter((k) => json[k] !== undefined)
+  if (!keys.length && effort === "max") {
+    json.max_tokens = 64_000
+    return true
+  }
+  for (const key of keys) {
+    const cur = Number(json[key] ?? NaN)
+    if (!Number.isFinite(cur) || cur < 64_000) {
+      json[key] = 64_000
+      changed = true
+    }
+  }
+  return changed
+}
+
 // ⚠ 不要用 TABLE（`DISPLAY_BY_SLOT`）当准入集合。
 //   TABLE 是**对外展示目录**，不是「上游可用集合」：`app-auto` / `file-auto` /
 //   `computer-auto` / `browser-auto` 这类旧真实槽位不在 TABLE 里，上游却仍然 200。
@@ -845,6 +884,11 @@ export function loaderHook(input, options = {}) {
               json.model = canonical
               changed = true
             }
+            // ── 0.9.7：reasoning_effort=max 的 max_tokens 自动补偿 ──────────
+            // 文档第九节（实测）：思考档开 max 时模型先思考 3-4 万 token，
+            // max_tokens=16000 → 上游 502 空正文；≥64000 → 200 正常返回。
+            // 规则见 applyReasoningBudgetFloor（纯函数，单测覆盖）。
+            if (applyReasoningBudgetFloor(json)) changed = true
             if (hasModelId(json.model) && isUnavailableModel(json.model)) {
               // 明确不可用名单（当前只有 kimi-k2.5）：本地挡掉，不出网、不 fallback。
               unavailableModel = String(json.model)

@@ -465,3 +465,140 @@ export function gatewayStatus() {
     protocol: "req/requestId + event=agent.run + payload",
   }
 }
+
+// ── 真实用量查询（0.9.7）─────────────────────────────────────────────
+//
+// 背景：HTTP 钱包接口 `/v3/marvis_get_wallet` 的 `used_tokens` 恒为 0（营销额度，
+// 上游不计量），卡片永远显示 10,000,000/10,000,000。而 Marvis 客户端 App 上
+// 「今日消耗 Token」来自 AG-UI 的 `agent.action` 动作：
+//   ① {"action":"conversations.list","limit":N} → 会话列表（含 conversation_id / created_at）
+//   ② {"action":"token.conversations_usage","conversation_ids":[...]} → 每会话
+//      {remote:{input_tokens,output_tokens},local:{...}}（与客户端同源的数据）
+// 协议实测（2026-11-28 04:35，本机 10123）：conversations.list → usage 两步全通，
+// 汇总数与客户端浮窗「累计Token消耗」一致。
+//
+// 帧格式与 agent.run 同壳：{"type":"req","requestId":"...","event":"agent.action",
+// "payload":{action,...}}；响应 {"type":"ack"|"res",...} / agent.action 事件回包。
+// usage_data 里 ack 的 ok:false（如参数缺失）不是致命错，忽略即可，最终以
+// 带数据的 agent.action 事件为准。
+
+/**
+ * 纯函数：把 conversations.list 与 token.conversations_usage 的原始数据
+ * 聚合成「今日 / 累计」两档 token 消耗。单测覆盖（不碰网络）。
+ *
+ * @param {any[]} conversations conversations.list 的会话数组
+ * @param {any[]} usageRows conversations_usage 的数据数组
+ * @param {number} [nowMs] 当前时间戳（注入便于测试）
+ * @param {number} [cnOffsetMs] 北京时间偏移（默认 +8h）
+ * @returns {{today:number,total:number,todayConversations:number,totalConversations:number}}
+ */
+export function aggregateUsage(conversations, usageRows, nowMs = Date.now(), cnOffsetMs = 8 * 3600_000) {
+  const rows = Array.isArray(usageRows) ? usageRows : []
+  const list = Array.isArray(conversations) ? conversations : []
+  const byId = new Map()
+  for (const c of list) {
+    const id = c?.conversation_id || c?.id
+    if (id) byId.set(String(id), c)
+  }
+  // 北京时间「今天 0 点」的 UTC 时间戳（与 usage.mjs nextResetAt 同一套换算）
+  const cn = new Date(nowMs + cnOffsetMs)
+  const todayStart = Date.UTC(cn.getUTCFullYear(), cn.getUTCMonth(), cn.getUTCDate()) - cnOffsetMs
+  const tok = (r) => Number(r?.remote?.input_tokens ?? 0) + Number(r?.remote?.output_tokens ?? 0)
+  let today = 0
+  let total = 0
+  let todayConversations = 0
+  let counted = 0
+  for (const r of rows) {
+    const t = tok(r)
+    if (!Number.isFinite(t) || t <= 0) continue
+    total += t
+    counted += 1
+    const c = byId.get(String(r?.conversation_id ?? ""))
+    const created = c?.created_at ? Date.parse(c.created_at) : NaN
+    if (Number.isFinite(created) && created >= todayStart) {
+      today += t
+      todayConversations += 1
+    }
+  }
+  return { today, total, todayConversations, totalConversations: counted }
+}
+
+/**
+ * 经本地网关查询真实 token 用量（与客户端 App 同源）。
+ * 客户端没开 / 连不上 / 超时 → 返回 null（调用方回落 HTTP 钱包）。
+ *
+ * ⚠ conversations.list 的 limit 实测上限 100（超了回 ok:false
+ *   "limit must be an integer between 1 and 100"，2026-11-28 04:42 实测
+ *   limit=200 被拒 —— 首版默认 200 就栽在这里：list 被拒 → 没有会话 id →
+ *   超时返回 null，看起来像「网关不可达」）。这里统一 clamp 进 1..100。
+ *
+ * @param {{timeoutMs?:number, limit?:number}} [opts] limit=拉取的会话条数上限（默认 100，clamp 1..100）
+ * @returns {Promise<{today:number,total:number,todayConversations:number,totalConversations:number}|null>}
+ */
+export async function gatewayUsage({ timeoutMs = 10_000, limit = 100 } = {}) {
+  const listLimit = Math.max(1, Math.min(100, Math.floor(Number(limit) || 100)))
+  const baseUrl = process.env.MARVIS_GW_URL || DEFAULT_URL
+  const token = localGatewayToken()
+  if (!token && !process.env.MARVIS_GW_URL) return null // 客户端没开，别白连
+  const url = withToken(baseUrl, token)
+  return new Promise((resolve) => {
+    let settled = false
+    let ws
+    try {
+      ws = new WebSocket(url)
+    } catch {
+      resolve(null)
+      return
+    }
+    /** @type {any[]|null} */
+    let conversations = null
+    /** @type {any[]|null} */
+    let usageRows = null
+    const finish = (v) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { ws.close() } catch { /* 已关 */ }
+      resolve(v)
+    }
+    const timer = setTimeout(() => finish(null), timeoutMs)
+    ws.onerror = () => finish(null)
+    ws.onclose = () => { if (!settled) finish(null) }
+    ws.onmessage = (ev) => {
+      let m
+      try { m = JSON.parse(String(ev.data)) } catch { return }
+      // agent.action 回包：实测（2026-11-28 04:35）type 是 "ack"（不是 "event"），
+      // 数据直接挂在 data 上；ok:false 的 ack 是参数错误提示，跳过等后续带数据的回包。
+      if (m?.event === "agent.action" && m?.data && m?.data?.ok !== false) {
+        const d = m.data
+        if (d.action === "conversations.list" && conversations === null) {
+          conversations = Array.isArray(d.data?.conversations) ? d.data.conversations : (Array.isArray(d.data) ? d.data : [])
+          const ids = conversations.map((c) => c?.conversation_id || c?.id).filter(Boolean).slice(0, listLimit)
+          if (!ids.length) {
+            finish({ today: 0, total: 0, todayConversations: 0, totalConversations: 0 })
+            return
+          }
+          try {
+            ws.send(JSON.stringify({
+              type: "req", requestId: `usage-${hex32().slice(0, 8)}`, event: "agent.action",
+              payload: { action: "token.conversations_usage", conversation_ids: ids },
+            }))
+          } catch { finish(null) }
+          return
+        }
+        if (d.action === "token.conversations_usage") {
+          usageRows = Array.isArray(d.data) ? d.data : []
+          finish(aggregateUsage(conversations ?? [], usageRows))
+        }
+      }
+    }
+    ws.onopen = () => {
+      try {
+        ws.send(JSON.stringify({
+          type: "req", requestId: `usage-list-${hex32().slice(0, 8)}`, event: "agent.action",
+          payload: { action: "conversations.list", limit: listLimit },
+        }))
+      } catch { finish(null) }
+    }
+  })
+}

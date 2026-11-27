@@ -1,3 +1,25 @@
+## 0.9.7 — 2026-11-28
+
+**额度卡片显示真实消耗（与客户端 App 同源）+ reasoning_effort 思考档预算自动补偿**
+
+- **真实用量显示**：额度卡片从「永远 10,000,000/10,000,000（上游钱包接口 `used_tokens` 恒为 0）」
+  改为优先走本地网关的 `token.conversations_usage`（与 Marvis 客户端 App「今日消耗 Token」
+  完全同源的数据），显示「今日消耗 X / 共 10,000,000（N 个会话）」+「全部会话累计」。
+  网关不可达（客户端没开）时静默回落 HTTP 钱包，行为与旧版一致；`MARVIS_USAGE_WS=0` 可关。
+- **协议实测踩坑两则**（都已写进代码注释与测试）：
+  ① `conversations.list` 的 `limit` 上限 100（首版默认 200 → `ok:false "limit must be an
+  integer between 1 and 100"` → 被静默跳过 → 超时回落钱包）；现已 clamp 进 1..100。
+  ② `usage()` 内部会对 windows 再跑一遍 `usageWindow()`——先包一层再传入会把 `textOnly`
+  标记剥掉，第二轮按普通窗口查 `used` 抛错被 catch 吞掉、静默回落钱包；现在网关分支
+  只传原始字段。
+- **reasoning_effort 思考档预算补偿**（文档第九节）：`reasoning_effort=max` 时模型先思考
+  3-4 万 token，`max_tokens=16000` → 上游 502 空正文；现在 loader 自动把用户给出的
+  `max_tokens`/`max_completion_tokens` 抬到 64000（两个都没给且 effort=max 时补
+  `max_tokens=64000`；high 档只在用户给了偏小预算时才抬；用户显式 ≥64000 不动）。
+  `MARVIS_MAX_TOKENS_FLOOR=0` 可关。
+- 测试：新增 `tests/usage-gateway.test.mjs`（5 例）与 `tests/reasoning-budget.test.mjs`
+  （9 例），合计 71/71 pass。
+
 ## 0.9.6 — 2026-11-28
 
 **并入 8088 本地网关源码（`gateway/`），原独立仓库 `Marvis-proxy-public` 归档**

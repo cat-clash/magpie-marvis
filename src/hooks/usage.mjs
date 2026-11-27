@@ -15,6 +15,7 @@ import { join } from "node:path"
 import { usage as buildUsage, usageWindow } from "../quota.mjs"
 import { businessHeaders } from "../marvis/protocol.mjs"
 import { directFetch } from "../marvis/directnet.mjs"
+import { gatewayUsage } from "../marvis/gateway.mjs"
 import { BASE } from "../context.mjs"
 
 const WALLET_URL = `${BASE}/v3/marvis_get_wallet`
@@ -70,6 +71,46 @@ export function usageHook() {
     }
     if (!acct.accessToken || !acct.openid) {
       return { error: "尚未登录 Marvis", windows: [] }
+    }
+
+    // ── 0.9.7：优先走本地网关拿**真实消耗**（与客户端 App「今日消耗 Token」同源）──
+    //   HTTP 钱包的 used_tokens 恒为 0（上游不计量营销额度），卡片永远不动；
+    //   AG-UI 的 token.conversations_usage 才是客户端浮窗展示的那套数据。
+    //   网关不可达（客户端没开）→ 静默回落 HTTP 钱包，行为与旧版一致。
+    //   MARVIS_USAGE_WS=0 可关掉这条优先路。
+    if (String(process.env.MARVIS_USAGE_WS ?? "").trim() !== "0") {
+      try {
+        const gw = await gatewayUsage()
+        if (gw) {
+          // ⚠ 窗口传**原始字段**，别先用 usageWindow() 包一遍 —— buildUsage 内部
+          //   （quota.mjs usage() 的 windows.map）会再过一次 usageWindow；
+          //   先包过的 textOnly 标记在第一轮就被剥掉，第二轮按普通窗口查 used
+          //   必抛 QuotaShapeError → 被 catch 吞掉 → 静默回落钱包（0.9.7 首版实测踩坑）。
+          return buildUsage({
+            plan: "Marvis 令牌",
+            windows: [
+              // 主窗口：今日真实消耗（数量型，路由排序读的就是它）。
+              // limit 沿用钱包总额 1000 万 —— 与客户端 App「83.6万/1000万」同一种刻度。
+              {
+                name: "今日消耗",
+                amount: gw.today,
+                limit: 10_000_000,
+                unit: "tokens",
+                resetsAt: nextResetAt(),
+                display:
+                  `今日消耗 ${fmt(gw.today)} / 共 10,000,000（客户端实时统计` +
+                  `${gw.todayConversations ? `，${gw.todayConversations} 个会话` : ""}）`,
+              },
+              // 累计（全部会话合计）单独一条，text-only 只上卡片不影响路由
+              ...(gw.total > 0
+                ? [{ name: "累计消耗", textOnly: true, display: `全部会话累计 ${fmt(gw.total)} tokens` }]
+                : []),
+            ],
+          })
+        }
+      } catch {
+        /* 网关查询失败：回落下面的 HTTP 钱包，不打断用量卡片 */
+      }
     }
 
     /** @type {any} */
