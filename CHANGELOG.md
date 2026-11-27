@@ -1,3 +1,15 @@
+## 0.9.6 — 2026-11-28
+
+**并入 8088 本地网关源码（`gateway/`），原独立仓库 `Marvis-proxy-public` 归档**
+
+- `gateway/` = 纯 Python 标准库实现的 OpenAI / Anthropic 兼容网关（默认 `http://127.0.0.1:8088/v1`），
+  原先单独发布为 `cat-clash/Marvis-proxy-public`；两仓同源维护容易出现版本漂移，现统一并入本仓库。
+- 只并入**源码**：`gateway/.gitignore` 排除 `data/` `logs/` `backups/` `native/`、设备指纹（`qimei36.txt` /
+  `marvis_appkey.txt` / `client_keys.txt`）、`__pycache__`，以及 `tools/bionic_shim/*.so` 预编译产物
+  （由 `tools/bionic_shim/build.sh` 现场重建）—— 公开仓库里不留运行数据与二进制。
+- 根 `README.md` 增加「内置 8088 本地网关」一节：启动方式、Web 控制台地址、首次提取出票 DLL 的步骤。
+- 插件行为无变化（`gateway` 传输通道与 `localgateway.mjs` 的探测逻辑未改）。
+
 ## 0.9.5 — 2026-11-28
 
 **4100404 熔断闸对 WS 通道生效 + 按响应延迟区分「设备硬拉黑」与「节奏限流」**

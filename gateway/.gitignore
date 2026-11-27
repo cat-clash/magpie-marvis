@@ -1,0 +1,33 @@
+# 运行数据（绝不入库）
+data/
+logs/
+backups/
+native/
+capture/*
+!capture/README.md
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.log.1
+serve.pid
+
+# 设备指纹与密钥（每台机器不同，首次启动自动生成）
+qimei36.txt
+marvis_appkey.txt
+client_keys.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 预编译 shim（由 tools/bionic_shim/build.sh 生成）
+*.so
+
+# 打包产物
+*.tar.gz
+*.zip

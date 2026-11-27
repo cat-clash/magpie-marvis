@@ -2,6 +2,20 @@
 
 > **⭐ 使用文档请读 [`README-FINAL.md`](./README-FINAL.md)。**
 
+## 内置 8088 本地网关（gateway/，0.9.6 起）
+
+`gateway/` 是原先独立的 `Marvis-proxy-public` 仓库源码，已并入本仓库统一维护（原仓库删除，避免两处漂移）。它是纯 Python 标准库实现的 OpenAI / Anthropic 兼容网关，默认 `http://127.0.0.1:8088/v1`，供 `gateway` 传输通道使用：
+
+```bash
+cd gateway
+python serve.py            # 或 Windows: run.bat / Unix: ./run.sh
+# 打开 http://127.0.0.1:8088/ 是 Web 控制台（账号池 / 用量 / 模型 / 接线 / 密钥 / 路由图）
+```
+
+- 运行数据（`data/` `logs/` `backups/` `native/`）与设备指纹**不入库**（见 `gateway/.gitignore`）
+- 首次使用先跑 `gateway/tools/extract_marvis_dll.py` 从已装客户端提取出票 DLL
+- 详细文档见 [`gateway/README.md`](./gateway/README.md)
+
 ## 传输通道（0.8.2）
 
 | 模式 | 说明 | 适用 |
