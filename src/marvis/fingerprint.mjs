@@ -162,10 +162,6 @@ const externalQimeiByAccount = new Map()
 /** detectQimeiFromClient 的进程级缓存：扫过一次（哪怕没找到）就不再扫 */
 let clientScanDone = false
 let clientScanHit = ""
-let androidLib = null
-let androidCtx = 0
-let androidError = ""
-let warnedAndroid = false
 let warnedRandom = false
 let warnedNative = false
 
@@ -188,10 +184,6 @@ export function reloadFingerprint() {
   externalQimeiByAccount.clear()
   clientScanDone = false
   clientScanHit = ""
-  androidLib = null
-  androidCtx = 0
-  androidError = ""
-  warnedAndroid = false
   warnedRandom = false
   warnedNative = false
   detectedAppVersion = ""
@@ -273,15 +265,11 @@ function loadBeacon(common = {}) {
 
 /**
  * 外部出票服务地址：环境变量优先，其次插件 native/uskey-url.txt。
- * Android 手机上没有环境变量时，可以把 URL 写在文件里。
+ * 0.9.8 瘦身：Android 默认地址（4617）已删除（手机传输已整体移除）。
  */
 function uskeyUrl() {
   const env = String(process.env.MARVIS_USKEY_URL || "").trim()
   if (env) return env
-  // Android / ARM64 的 magpie App：默认找本机 DSH 出票守护进程（启动脚本会自动拉起）。
-  if (process.platform === "android" || (process.platform === "linux" && process.arch === "arm64")) {
-    return "http://127.0.0.1:4617/uskey"
-  }
   for (const name of ["uskey-url.txt", "uskey_url.txt"]) {
     try {
       const v = readFileSync(join(NATIVE_DIR, name), "utf8").trim()
@@ -509,62 +497,6 @@ export function syntheticUskey() {
   return localUskey()
 }
 
-/**
- * Android / Bun 内置出票：直接 dlopen APP 里的 libqimei.so，调用导出的
- * UKInstanceGetDefault / UKInstanceInit / UKInstanceGetUSkey。
- *
- * 这条路只依赖插件 native/libqimei.so，不再需要外部 Python 服务；
- * Node（Windows / Linux）上 process.versions.bun 为空，会跳过。
- */
-async function androidBunUskey(busInfo) {
-  if (!process.versions?.bun) {
-    androidError = "process.versions.bun 不存在（当前不是 Bun 运行时）"
-    return ""
-  }
-  const libPath = join(NATIVE_DIR, "libqimei.so")
-  if (!existsSync(libPath)) return ""
-  try {
-    if (!androidLib) {
-      const { dlopen, FFIType } = await import("bun:ffi")
-      androidLib = dlopen(libPath, {
-        UKInstanceGetDefault: { args: [], returns: FFIType.ptr },
-        UKInstanceInit: {
-          args: [FFIType.ptr, FFIType.cstring, FFIType.cstring],
-          returns: FFIType.void,
-        },
-        UKInstanceGetUSkey: {
-          args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring],
-          returns: FFIType.cstring,
-        },
-      })
-      androidCtx = androidLib.symbols.UKInstanceGetDefault()
-      androidLib.symbols.UKInstanceInit(androidCtx, APP_KEY, appVersion())
-    }
-    const ticket = androidLib.symbols.UKInstanceGetUSkey(androidCtx, "marvis", busInfo, "")
-    return String(ticket || "").trim()
-  } catch (err) {
-    androidError = `${err?.name ?? "Error"}: ${err?.message ?? err}`
-    if (!warnedAndroid) {
-      warnedAndroid = true
-      if (process.env.MARVIS_DEBUG_FFI === "1") {
-        try {
-          console.warn(`[marvis-fingerprint] Android Bun 出票失败：${androidError}`)
-        } catch {
-          /* 日志失败不影响请求 */
-        }
-      }
-    }
-    return ""
-  }
-}
-
-/**
- * 按本次请求上下文出一张 uskey。
- *
- * @param {{ guid?: string, openid?: string, loginType?: string }} [acct]
- * @param {{ busInfo?: string, loginType?: string }} [identity]
- * @returns {Promise<string>}
- */
 export async function uskeyOf(acct = {}, identity = {}) {
   const busInfo = String(identity.busInfo || "")
   if (!busInfo) throw new Error("uskeyOf 需要 identity.busInfo（请求上下文不能为空）")
@@ -574,9 +506,6 @@ export async function uskeyOf(acct = {}, identity = {}) {
     login_openid: String(acct.openid ?? ""),
     login_type: String(identity.loginType ?? process.env.MARVIS_LOGIN_TYPE ?? "6"),
   }
-
-  const android = await androidBunUskey(busInfo)
-  if (android) return android
 
   const b = loadBeacon(common)
   if (b && typeof b.getUskey === "function") {
@@ -646,16 +575,14 @@ export function fingerprintStatus() {
     qimei36Length: qimei.length,
     // backend 只报告"实际会走的出票通道"："random" 仅在显式 opt-in 时出现；
     // 什么都没配（且未 opt-in）时是 "none" —— uskeyOf 会 fail-fast
-    backend: androidLib
-      ? "android-bun"
-      : native
-        ? "native"
-        : uskeyUrl()
-          ? "external"
-          : randomUskeyAllowed()
-            ? "random"
-            : "none",
-    error: androidError || beaconError,
+    backend: native
+      ? "native"
+      : uskeyUrl()
+        ? "external"
+        : randomUskeyAllowed()
+          ? "random"
+          : "none",
+    error: beaconError,
   }
 }
 

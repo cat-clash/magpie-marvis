@@ -1,10 +1,9 @@
-// openclaw 传输层离线测试 —— 用 tests/mock_openclaw.py 模拟真实 openclaw 网关
+// openclaw 传输层离线测试 —— 用 tests/mock_gateway.py 模拟真实本地网关（0.9.8：remote 测试已删）
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { writeFileSync, unlinkSync } from "node:fs"
 
 import {
   flattenMessages,
@@ -20,7 +19,6 @@ process.env.MARVIS_WS_MODE = ""
 process.env.MARVIS_DIRECT_TRANSPORT ??= "fetch"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PORT = 18766
 
 /** 依次尝试 OPENCLAW_TEST_PY → python3 → python，spawnSync -V 探测；都不可用返回 null */
 function detectPython() {
@@ -50,14 +48,17 @@ test("flattenMessages 展平多轮消息", () => {
 
 test("openclawEnabled / openclawStatus 形状正确", () => {
   const s = openclawStatus()
-  assert.ok(["relay", "remote", "off"].includes(s.mode))
+  assert.ok(["relay", "auto", "off"].includes(s.mode))
   assert.equal(typeof s.url, "string")
-  assert.ok(s.sessionKey)
   assert.equal(typeof openclawEnabled(), "boolean")
   // 0.8.2：配置来源诊断字段
   assert.equal(typeof s.fileMode, "string")
   assert.equal(typeof s.envMode, "string")
   assert.equal(typeof s.overrideWarning, "string")
+  // 0.9.8：remote 删除后不再有 handshake/frames/sessionKey 字段
+  assert.equal(s.handshake, undefined)
+  assert.equal(s.frames, undefined)
+  assert.equal(s.sessionKey, undefined)
 })
 
 test("wsModeOverride：env=off 覆盖 file=relay 给出可行动提示", () => {
@@ -69,9 +70,10 @@ test("wsModeOverride：env=off 覆盖 file=relay 给出可行动提示", () => {
   assert.match(w, /清掉|SetEnvironmentVariable/)
 })
 
-test("wsModeOverride：env=off 覆盖 file=remote 也提示", () => {
-  const w = wsModeOverride("OFF", "remote", "off")
+test("wsModeOverride：env=remote（已删除）给出视同 relay 提示", () => {
+  const w = wsModeOverride("remote", "relay", "relay")
   assert.match(w, /remote/)
+  assert.match(w, /0\.9\.8/)
 })
 
 test("wsModeOverride：一致或未设置时不告警", () => {
@@ -82,7 +84,8 @@ test("wsModeOverride：一致或未设置时不告警", () => {
 })
 
 test("wsModeOverride：其它不一致组合给出通用提示", () => {
-  const w = wsModeOverride("remote", "relay", "remote")
+  // 0.9.8：off→relay 与 remote→relay 有专属文案，通用分支用 relay→off 组合验证
+  const w = wsModeOverride("relay", "off", "relay")
   assert.match(w, /覆盖/)
   assert.match(w, /实际生效/)
 })
@@ -134,35 +137,5 @@ test("端到端：relay 走本地网关 AG-UI（gateway.connected → agent.run 
   assert.equal(result.model, "mock-gateway-model")
 })
 
-test("端到端：remote openclaw（method:connect → chat.send）", { timeout: 30_000 }, async (t) => {
-  if (!PY) {
-    t.skip("python 不可用，跳过 WS 端到端")
-    return
-  }
-  const child = spawn(PY, [join(HERE, "mock_openclaw.py"), String(PORT)], { stdio: "ignore" })
-  t.after(() => child.kill())
-  const prevMode = process.env.MARVIS_WS_MODE
-  const prevUrl = process.env.MARVIS_WS_URL
-  process.env.MARVIS_WS_MODE = "remote"
-  process.env.MARVIS_WS_URL = `ws://127.0.0.1:${PORT}/`
-  // remote 模式要求 handshake；用临时文件造一份
-  const hs = join(HERE, ".tmp-handshake.log")
-  writeFileSync(hs, "GET / HTTP/1.1\nHost: 127.0.0.1:18766\nsessionId: 11111111-2222-3333-4444-555555555555\ntoken: abc.def-ghi\n")
-  process.env.MARVIS_HANDSHAKE = hs
-  t.after(() => {
-    if (prevMode === undefined) delete process.env.MARVIS_WS_MODE
-    else process.env.MARVIS_WS_MODE = prevMode
-    if (prevUrl === undefined) delete process.env.MARVIS_WS_URL
-    else process.env.MARVIS_WS_URL = prevUrl
-    delete process.env.MARVIS_HANDSHAKE
-    try { unlinkSync(hs) } catch {}
-  })
-  await new Promise((r) => setTimeout(r, 1200))
-
-  const result = await openclawChat(
-    { openid: "TESTOPENID", accessToken: "TESTTOKEN", guid: "test-guid" },
-    { model: "main-auto", messages: [{ role: "user", content: "你好" }] },
-  )
-  assert.equal(result.text, "这是 mock 网关的回复")
-  assert.equal(result.model, "mock-model")
-})
+// 0.9.8 瘦身：remote（method:connect → chat.send 手机会话域）端到端测试已删除
+// （传输层整体移除，mock_openclaw.py 保留但不再被引用）

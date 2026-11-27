@@ -1,3 +1,24 @@
+## 0.9.8 — 2026-11-28
+
+**瘦身：删除手机端（Termux/remote 会话域/Android FFI）与手机登录，插件回到 PC-only**
+
+- **删除 `remote` 传输**（openclaw 远端 wss + connect/chat.send 协议 + handshake/frames
+  抓包凭据 + killCmd 抢会话）：该路径需要 15-20 分钟短命的抓包凭据、与 PC 同源风控域、
+  从未实测成功，无维护价值。`MARVIS_WS_MODE=remote` 存量配置自动归一化为 relay（不报错）。
+- **删除 Android 出票**（fingerprint.mjs 的 `androidBunUskey` / bun:ffi dlopen 路径 +
+  Android 默认出票地址 4617）；uskey 出票保留 Beacon native 与 MARVIS_USKEY_URL 外部服务两条。
+- **删除手机登录**（mobile-login.mjs 566 行 + 粘贴码服务 + phone-setup.sh +
+  magpie-marvis-diag.sh + build-phone-kit.mjs）：methods() 只保留 PC 桌面登录
+  （QQ/微信扫码 + 从本机 Marvis 导入 + 无头粘贴回调地址）。
+- **文案清理**：loader/failure-hints 中所有 remote/handshake/手机端指引改为 relay/PC 客户端；
+  `shouldAutoWsFallback` / `enhanceRiskMessage` / `connectionFailureHint` 去掉 mobile 参数。
+- **测试**：删除 mobile/remote/phone 相关测试 4 个；更新 failure-hints/openclaw/qa-config/
+  qa-concurrency/optimization-083/loader-model-support 断言；qa-persistence 从 bun:test
+  转 node:test（仓库 test 脚本是 node --test，bun: 协议在 node 下无法加载）。
+  全量 **462 例 / 0 失败 / 5 skipped**。
+- **净减约 1100 行**（openclaw.mjs 815→约 500、fingerprint.mjs 671→约 600、
+  mobile-login.mjs -566、脚本 -2 个）。
+
 ## 0.9.7 — 2026-11-28
 
 **额度卡片显示真实消耗（与客户端 App 同源）+ reasoning_effort 思考档预算自动补偿**

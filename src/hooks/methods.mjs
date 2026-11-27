@@ -31,7 +31,7 @@ import { openIsolatedLogin, findBrowser } from "../marvis/browser.mjs"
 import { resolveAccount } from "../account-name.mjs"
 import { importFromDesktop, desktopAvailable } from "../marvis/desktop.mjs"
 import { fetchUserProfile, accountLabel } from "../marvis/profile.mjs"
-import { isMobile, mobileOauthLogin, mobileInstructions } from "../marvis/mobile-login.mjs"
+// 0.9.8 瘦身：mobile-login.mjs（手机端登录 / 粘贴码服务）已删除
 
 /**
  * 登录过程中的 state → 虚拟设备 guid。
@@ -307,102 +307,61 @@ function gatewayPlaceholderAccount() {
 
 export function methods() {
   const list = []
-  const mobile = isMobile()
 
-  // ⚠⚠ 手机端：三个入口都要在（**宿主实测反推**，2026-11-24）：
-  //
-  //   实测方式：装一个探针插件（同一条 authorize 分别返回两种形态），
-  //   跑 `magpie plugin login <probe>` 看宿主实际渲染了什么：
-  //     · { opened:false, method:"code" } → 宿主输出
-  //         「Sign in in your browser. If it didn't open, go to: <url>」
-  //         + instructions + 「Code:」输入提示   ← 有粘贴框
-  //     · { opened:true,  method:"auto" } → 只有 url + instructions，
-  //         **没有「Code:」那一行**               ← 没有粘贴框
-  //
-  //   上一版手机端用的正是第二种（opened:true + method:"auto"），于是：
-  //   用户点 QQ 登录 → 只看到一段文字和一个链接 → 没有输入框可粘、
-  //   也没有「打开浏览器」按钮可点 —— 截图里的现象。
-  //
-  //   所以手机端必须用 method:"code"（拿输入框）+ 不设 opened:true（保留唤起按钮）。
-  //   宿主协议层的实现在 host bundle：
-  //     `s.a.method === "code" ? s.a.callback(code ?? "", {signal}) : s.a.callback(undefined, {signal})`
-  //   —— method:"code" 时用户输入的 code 会被原样交给插件的 callback。
-  //
-  if (mobile) {
-    // toAuth 把内部账号形状转成宿主 auth（含 accountId / uid / metadata），
-    // 与桌面路径的 authOf 完全同一套 —— 两条路的账号在 magpie 里形状一致。
-    const toAuth = (acct) => authOf(acct)
-    list.push(
-      mobileOauthLogin({
-        loginType: "QC",
-        label: "QQ 登录",
-        instructions: mobileInstructions("QC"),
-        toAuth,
-      }),
-      mobileOauthLogin({
-        loginType: "WX",
-        label: "微信登录",
-        instructions: mobileInstructions("WX"),
-        toAuth,
-      }),
-    )
-  } else {
-    list.push(
-      oauthLogin(
-        "QC",
-        "QQ 登录",
-        "1) 会打开一个**独立的**浏览器窗口（不碰你日常浏览器）\n" +
-          "2) 用你的 QQ 登录并确认授权\n" +
-          "3) 授权完成后窗口会自己关掉，回到 magpie 即可",
-      ),
-      oauthLogin(
-        "WX",
-        "微信登录",
-        "1) 会打开一个**独立的**浏览器窗口（不碰你日常浏览器）\n" +
-          "2) 用微信扫码并确认\n" +
-          "3) 授权完成后窗口会自己关掉，回到 magpie 即可",
-      ),
-    )
-  }
+  // 0.9.8 瘦身：手机端登录分支（mobile-login.mjs / 粘贴码服务）已整体删除，
+  // 本插件只支持 PC 桌面登录（QQ / 微信扫码授权）。manualPasteLogin（无头/远程
+    // 粘贴回调地址）保留 —— 它与手机无关，PC 上同样可用。
+  list.push(
+    oauthLogin(
+      "QC",
+      "QQ 登录",
+      "1) 会打开一个**独立的**浏览器窗口（不碰你日常浏览器）\n" +
+        "2) 用你的 QQ 登录并确认授权\n" +
+        "3) 授权完成后窗口会自己关掉，回到 magpie 即可",
+    ),
+    oauthLogin(
+      "WX",
+      "微信登录",
+      "1) 会打开一个**独立的**浏览器窗口（不碰你日常浏览器）\n" +
+        "2) 用微信扫码并确认\n" +
+        "3) 授权完成后窗口会自己关掉，回到 magpie 即可",
+    ),
+  )
 
-  // 本地网关占位账号：手机 / 网关模式下**排在真登录之后**。
+  // 本地网关占位账号：网关模式下**排在真登录之后**。
   // 它是「不上传任何凭据的本地占位」，第一次用的人多半要登真号，放第一位会让人以为只有这个。
   if (gatewayConfig().enabled) list.push(gatewayPlaceholderAccount())
 
-  // 手机上没有 Windows 进程可读，这条只在桌面出现
-  if (!mobile) {
-    list.push({
-      type: "oauth",
-      label: "从本机 Marvis 导入（需已安装并登录）",
-      async authorize() {
-        const ok = await desktopAvailable()
-        return {
-          // ⚠ 必须 opened: true + method: "auto"，否则 magpie 会去开这个 url
-          //   （之前给 about:blank 弹了一次「没有可打开此链接的应用」）
-          url: "",
-          opened: true,
-          method: "auto",
-          instructions: ok
-            ? "已检测到本机 Marvis 客户端，正在读取登录态…"
-            : "本机没找到运行中的 Marvis 客户端。请先打开 Marvis 并登录，或改用 QQ / 微信 登录。",
-          async callback() {
-            const acct = await importFromDesktop()
-            const loginType = acct.loginType === "2" ? "WX" : "QC"
-            return authOf(await withProfile(acct, loginType))
-          },
-        }
-      },
-    })
-  }
+  // 0.9.8 瘦身：本插件只面向 PC，「从本机 Marvis 导入」无条件提供
+  list.push({
+    type: "oauth",
+    label: "从本机 Marvis 导入（需已安装并登录）",
+    async authorize() {
+      const ok = await desktopAvailable()
+      return {
+        // ⚠ 必须 opened: true + method: "auto"，否则 magpie 会去开这个 url
+        //   （之前给 about:blank 弹了一次「没有可打开此链接的应用」）
+        url: "",
+        opened: true,
+        method: "auto",
+        instructions: ok
+          ? "已检测到本机 Marvis 客户端，正在读取登录态…"
+          : "本机没找到运行中的 Marvis 客户端。请先打开 Marvis 并登录，或改用 QQ / 微信 登录。",
+        async callback() {
+          const acct = await importFromDesktop()
+          const loginType = acct.loginType === "2" ? "WX" : "QC"
+          return authOf(await withProfile(acct, loginType))
+        },
+      }
+    },
+  })
 
-  // 无头 / NAS / 手机：宿主自带输入框的「粘贴回调地址」入口。
-  // ⚠ 手机端**必须**有这一条 —— 它是壳渲染输入框的那条路（method:"code"），
-  //   也是「浏览器登录」这个入口本身。用户要的是三个入口：QQ、微信、浏览器。
+  // 无头 / NAS / 远程：宿主自带输入框的「粘贴回调地址」入口
   list.push(
     manualPasteLogin(
       "QC",
       "QQ 登录（浏览器 · 粘贴回调地址）",
-      "1) 点上面的按钮用**手机浏览器**打开 QQ 授权页（已装手机 QQ 会直接唤起 App）\n" +
+      "1) 点上面的按钮打开 QQ 授权页（已装手机 QQ 会直接唤起 App）\n" +
         "2) 登录并确认授权后，浏览器停在 `yybadaccess.3g.qq.com/…marvis_oauth?login_type=QC&code=…`\n" +
         "3) 长按地址栏 → 全选 → 复制，把那条地址整条粘贴到下面的输入框",
       { mobile: true },

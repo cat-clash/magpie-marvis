@@ -215,10 +215,11 @@ test("wsModeOverride：file 为空时无警告（无文件配置）", () => {
   assert.equal(w, "", "file 为空时无警告")
 })
 
-test("wsModeOverride：env=remote 覆盖 file=relay 给出通用提示", () => {
-  const w = wsModeOverride("remote", "relay", "remote")
+test("wsModeOverride：env=remote（0.9.8 已删除）给出视同 relay 提示", () => {
+  const w = wsModeOverride("remote", "relay", "relay")
   assert.ok(w.length > 0, "有冲突时给出提示")
-  assert.match(w, /实际生效/, "通用提示包含实际生效值")
+  assert.match(w, /0\.9\.8/, "说明 remote 传输已删除")
+  assert.match(w, /视同 relay/, "remote 归一化为 relay")
 })
 
 test("wsModeOverride：大小写不敏感（OFF 等价 off）", () => {

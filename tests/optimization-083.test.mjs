@@ -21,7 +21,8 @@ test("openclawMode(modeOverride)：显式模式覆盖 env/文件，且不改 pro
     process.env.MARVIS_WS_MODE = "off"
     assert.equal(openclawMode("relay"), "relay", "单次请求覆盖成 relay")
     assert.equal(process.env.MARVIS_WS_MODE, "off", "全局 env 原封不动")
-    assert.equal(openclawMode("remote"), "remote")
+    // 0.9.8：remote 已删除，显式 remote 归一化为 relay（存量配置不报错）
+    assert.equal(openclawMode("remote"), "relay", "remote 归一化为 relay")
     assert.equal(process.env.MARVIS_WS_MODE, "off", "多次覆盖也不串味")
     assert.equal(openclawMode(""), "off", "空覆盖退回 env")
   } finally {

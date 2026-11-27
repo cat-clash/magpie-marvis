@@ -9,7 +9,34 @@
 //
 // 跑法：bun test tests/qa-persistence.test.mjs
 
-import { describe, test, expect, beforeAll, afterEach } from "bun:test"
+// 0.9.8：原 bun:test 改为 node:test + assert（仓库 test 脚本是 node --test，
+// bun 环境下本文件曾无法被 node 加载 —— ERR_UNSUPPORTED_ESM_URL_SCHEME: bun:）
+import { describe, test, before as beforeAll, afterEach } from "node:test"
+import assert from "node:assert/strict"
+
+/** bun:test expect() 的最小 node:assert 实现（只覆盖本文件用到的匹配器） */
+function expect(actual) {
+  const api = {
+    toBe: (exp) => assert.strictEqual(actual, exp),
+    toEqual: (exp) => assert.deepStrictEqual(actual, exp),
+    toMatch: (re) => assert.match(String(actual), re),
+    toContain: (v) => assert.ok(actual?.includes?.(v)),
+    toBeTruthy: () => assert.ok(actual),
+    toBeFalsy: () => assert.ok(!actual),
+    toBeGreaterThan: (n) => assert.ok(actual > n),
+    toBeNull: () => assert.strictEqual(actual, null),
+    toBeUndefined: () => assert.strictEqual(actual, undefined),
+  }
+  api.not = {
+    toBe: (exp) => assert.notStrictEqual(actual, exp),
+    toEqual: (exp) => assert.notDeepStrictEqual(actual, exp),
+    toMatch: (re) => assert.doesNotMatch(String(actual), re),
+    toContain: (v) => assert.ok(!actual?.includes?.(v)),
+    toBeNull: () => assert.notStrictEqual(actual, null),
+    toBeUndefined: () => assert.notStrictEqual(actual, undefined),
+  }
+  return api
+}
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"

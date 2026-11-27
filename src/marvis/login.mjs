@@ -50,7 +50,7 @@ const REDIRECT = `${BASE}/marvis_client_login/marvis_oauth`
  *   没装则走手机版网页登录。（真机行为待验证；即使只降级成手机版网页，也比 PC 表单可用。）
  *
  * ⚠ 微信没有等价的 display 开关：`qrconnect` 是「网站应用扫码登录」，系统浏览器打开
- *   只显示二维码（一台手机扫不了自己的码）。手机上的出路见 mobile-login.mjs：
+ * 手机端一台设备扫码不了自己的码（0.9.8 起手机端支持已删除，仅作历史说明保留）。
  *   唤起微信 App + 把授权链接复制到微信里打开，微信内置浏览器直接弹「确认授权」。
  *
  * @param {"QC" | "WX"} loginType

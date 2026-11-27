@@ -32,7 +32,7 @@ import {
   shouldAutoWsFallback,
   enhanceRiskMessage,
 } from "../marvis/failure-hints.mjs"
-import { isMobile } from "../marvis/mobile-login.mjs"
+// 0.9.8 瘦身：mobile-login.mjs（isMobile 等手机端登录）已删除
 
 /**
  * 首行自愈成功记忆：(账号桶, 原首行 hash) → 上次成功放行的改写句。
@@ -1022,8 +1022,7 @@ export function loaderHook(input, options = {}) {
               "risk_blocked",
               "上游风控拦截（Marvis PC 客户端 WS 通道）：agent.run 被 risk_control_blocked 拦下，"
                 + "与 HTTP 直连的 4100404 同源，换账号 / 换 IP 都无效。"
-                + "可行出路只有两条：① 手机会话域 MARVIS_WS_MODE=remote + MARVIS_HANDSHAKE=<handshake.log>；"
-                + "② 本地 Python 网关（8088）。自检：node scripts/cli.mjs doctor。"
+                + "可行出路只有一条：本地 Python 网关（8088）。自检：node scripts/cli.mjs doctor。"
                 + `原始返回：${String(err?.message ?? err).slice(0, 400)}`,
               retryAfterSec,
             )
@@ -1032,7 +1031,7 @@ export function loaderHook(input, options = {}) {
           // 以前只甩一句「连不上」，用户不知道下一步做什么。这里补一条**能直接执行**的诊断：
           // 手机上指向本地 8088 网关的 diag.sh --fix；桌面上指向 PC 客户端/WS_MODE 出路。
           const errText = String(err?.message ?? err)
-          const diag = connectionFailureHint({ mobile: isMobile(), errText })
+          const diag = connectionFailureHint({ errText })
           const res = errorResponse(503, "upstream_unreachable", `连不上 Marvis 网关：${errText}`, {
             "x-marvis-diagnosis": diag.header,
           })
@@ -1124,12 +1123,11 @@ export function loaderHook(input, options = {}) {
           const hardBlocked = hardThreshold > 0 && upstreamMs > 0 && upstreamMs < hardThreshold
           const retryAfterSec = Math.max(1, Math.ceil(breaker.retryAfterMs / 1000) || 60)
           const status = Number.parseInt(String(process.env.MARVIS_RISK_STATUS ?? ""), 10) || 429
-          const mobile = isMobile()
           const baseMessage = hardBlocked
             ? `上游风控拦截（**设备硬拉黑**）：403 + 4100404 在 ${upstreamMs}ms 内秒回`
               + `（< ${hardThreshold}ms 即判设备号已被拉黑）。`
               + "此时服务端在业务逻辑之前就按**设备号 qimei36** 拒掉，"
-              + "换账号 / 换 IP / 切 WS 通道（relay / remote）/ 改首行 / 重装插件 / 等冷却**全都无效**。"
+              + "换账号 / 换 IP / 切 WS 通道（relay）/ 改首行 / 重装插件 / 等冷却**全都无效**。"
               + "唯一出路是换一个**由腾讯服务端签发**的 qimei36（改 MAC 等本地手段只会让 qimei.dll"
               + "进入「拒绝交付」分支返回空号，伪造 36-hex 则 100% 秒拒）。"
               + "判定与修复详见 KNOWN_ISSUES.md BUG #7。"
@@ -1158,7 +1156,6 @@ export function loaderHook(input, options = {}) {
           const autoEnabled =
             !skipAutoForHardBlock &&
             shouldAutoWsFallback({
-              mobile,
               mode: String(process.env.MARVIS_WS_MODE ?? ""),
               autoDisabled: String(process.env.MARVIS_RISK_AUTO_WS ?? "") === "0",
               riskStatus: status,
@@ -1201,7 +1198,7 @@ export function loaderHook(input, options = {}) {
           return errorResponse(
             status,
             "risk_blocked",
-            enhanceRiskMessage(baseMessage, { mobile, probeReachable, autoTried, autoError }),
+            enhanceRiskMessage(baseMessage, { probeReachable, autoTried, autoError }),
             { "retry-after": String(retryAfterSec) },
           )
         }

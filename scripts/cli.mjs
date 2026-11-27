@@ -44,7 +44,6 @@ async function doctorPhone(argv) {
   const url = String(process.env.MARVIS_GATEWAY_URL ?? `http://127.0.0.1:${port}/v1`)
   const nativeDir = String(process.env.MARVIS_NATIVE_DIR ?? join(homedir(), ".magpie-marvis-native"))
   const cfgPath = String(process.env.MARVIS_GATEWAY_CONFIG ?? join(nativeDir, "gateway.json"))
-  const diagPath = join(nativeDir, "magpie-marvis-diag.sh")
   const checks = []
   let ok = true
 
@@ -69,7 +68,7 @@ async function doctorPhone(argv) {
     checks.push({ name: "gateway.json", status: "MISSING", value: cfgPath, error: String(err?.message ?? err) })
   }
 
-  checks.push({ name: "diag script", status: existsSync(diagPath) ? "OK" : "WARN", value: diagPath })
+  // 0.9.8 瘦身：手机端 diag 脚本（magpie-marvis-diag.sh / phone-setup.sh）已删除
 
   try {
     const res = await fetch(`${url.replace(/\/$/, "")}/models`, { signal: AbortSignal.timeout(1500) })
@@ -91,7 +90,7 @@ async function doctorPhone(argv) {
   for (const c of checks) {
     console.log(`${String(c.status).padEnd(7)} ${c.name}: ${c.value ?? ""}${c.error ? ` (${c.error})` : ""}${c.expect ? ` [expect ${c.expect}]` : ""}`)
   }
-  console.log(ok ? "VERDICT: gateway ready; run magpie provider test." : "VERDICT: fix FAIL items above; then sh ~/.magpie-marvis-native/magpie-marvis-diag.sh --fix or phone-setup.sh.")
+  console.log(ok ? "VERDICT: gateway ready; run magpie provider test." : "VERDICT: fix FAIL items above; then re-run doctor.")
   process.exit(ok ? 0 : 1)
 }
 

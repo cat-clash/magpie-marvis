@@ -59,7 +59,7 @@ const { createPacing } = await import("../src/pacing.mjs")
 // A. openclawMode(modeOverride) 并发安全
 // ═══════════════════════════════════════════════════════════════════
 
-test("A1 openclawMode：relay/remote/off 各 50 次并发，env 全程零写入、各调用不串味", { timeout: 20_000 }, async (t) => {
+test("A1 openclawMode：relay/off 各 75 次并发，env 全程零写入、各调用不串味", { timeout: 20_000 }, async (t) => {
   // 用属性拦截器捕获任何对 process.env.MARVIS_WS_MODE 的写入（最强行为级证据）。
   let envWrites = 0
   let value = "off"
@@ -89,10 +89,11 @@ test("A1 openclawMode：relay/remote/off 各 50 次并发，env 全程零写入�
 
   const baseline = process.env.MARVIS_WS_MODE
   const sampler = []
-  const modes = ["relay", "remote", "off"]
+  // 0.9.8：remote 已删除（归一化为 relay），并发矩阵只保留 relay/off
+  const modes = ["relay", "off"]
   const calls = []
   for (let i = 0; i < 150; i += 1) {
-    const mode = modes[i % 3]
+    const mode = modes[i % 2]
     calls.push(
       (async () => {
         // 制造微任务交错窗口：老实现会在此窗口里写 env 导致串味
