@@ -1,5 +1,29 @@
+## 0.9.4 — 2026-11-27
+
+**修复 relay 模式被 BOM 配置打成 auto，导致 openclaw 协议错发到 PC AG-UI 网关**
+
+**修复 relay 模式被 BOM 配置打成 auto，导致 openclaw 协议错发到 PC AG-UI 网关**
+
+- **根因**：Windows PowerShell 5.1 的 Set-Content -Encoding UTF8 会写 UTF-8 BOM（EF-BB-BF）。
+  Node 的 JSON.parse 不接受 BOM，ileConfig() 静默跳过 openclaw.json，于是 mode 从
+  relay 落回 auto。auto 的 URL 是 10123，但旧代码把它送进 openclawRemoteStream
+  发 {"type":"req","method":"connect"}；PC 客户端的 AG-UI 网关只认
+  gateway.connected + event:"agent.run"，MarvisHost.log 明确回
+  missing field event，插件 12s 后误报「握手无应答 / 前端独占会话」。
+- **修复**：
+  - ileConfig() 读取配置前 replace(/^\\uFEFF/, "")，BOM 配置也能解析。
+  - auto 与 relay 一样走 gatewayChatStream（本地 AG-UI 协议），
+    method:"connect" 只留给真正的 remote wss。
+  - 新增 tests/openclaw-config-bom.test.mjs 锁住 BOM 回归。
+- **验证**：修复前 probe-openclaw 显示 mode=auto，provider test 为 503 握手无应答；
+  修复后 mode=relay / fileMode=relay / token=found，错误变为正常的
+  429 risk_control_blocked（PC WS 也被风控拦时的标准错误），说明协议错位已消除。
+- REA 仓库（cat-clash/REA）全库无 Marvis/openclaw/10123 条目；本修复依据插件源码与
+  MarvisHost.log 实测，不引用 REA 作为技术来源。
+
 ## 0.9.3 — 2026-11-27
 
+HEAD
 **并发回到 3（0.8.8 的 1 太保守，agent 并行任务全排队）**
 
 - **改**：`package.json` 的 `magpie.maxConcurrency` 由 **1 → 3**。
@@ -11,6 +35,8 @@
   先降回 2 再观察；需要更高吞吐请走多账号 + `MARVIS_PACING_SCOPE=account`
   （每号独立时间轴），而不是继续提高单设备并发。
 - **注意**：`maxConcurrency` 是宿主在加载插件时读的，改完需要重载插件或重启 magpie 才生效。
+
+1958888 (fix(0.9.3): strip BOM in openclaw config and route auto through AG-UI relay)
 
 ## 0.9.2 — 2026-11-27
 
