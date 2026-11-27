@@ -291,13 +291,37 @@ test("4100404 风控 → 429 + Retry-After（fail-fast，不让宿主连试 7 �
     assert.ok(Number(res.headers.get("retry-after")) >= 1, "必须带 retry-after")
     const out = await res.json()
     assert.equal(out.error.code, "risk_blocked")
+    // 0.9.5：mock 响应必然 <800ms ⇒ 按**设备硬拉黑**分支给文案 ——
+    // 明确告诉用户换账号 / 换 IP / 切 WS 都无效，唯一出路是换服务端签发的 qimei36。
+    assert.match(out.error.message, /设备硬拉黑/, "快 403 必须判成设备硬拉黑（<800ms 判据）")
+    assert.match(out.error.message, /换账号/, "硬拉黑下换账号无效要写明")
+    assert.match(out.error.message, /qimei36/, "指出真正的封锁对象是设备号")
+    assert.match(out.error.message, /remote/, "仍提到 WS 通道（说明它同样被封）")
+  } finally {
+    s.restore()
+  }
+})
+
+test("4100404 慢速（≥800ms，MARVIS_HARD_BLOCK_MS=0 同效）→ 限流文案：账号级/通道级分开说", async () => {
+  const prev = process.env.MARVIS_HARD_BLOCK_MS
+  process.env.MARVIS_HARD_BLOCK_MS = "0" // 关闭耗时判定 ⇒ 走原「节奏限流」分支
+  const s = stubFetch(() => upstreamError(403, { code: 4100404, msg: "客户端通用错误:请求被风控拦截" }))
+  try {
+    const req = requestFor("deepseek-v4-1-flash-261017")
+    const res = await (await loaderOf()).fetch(req.url, req.init)
+    assert.equal(res.status, 429)
+    const out = await res.json()
+    assert.equal(out.error.code, "risk_blocked")
     // 0.8.0：熔断按账号分桶，「换账号没用」只在通道级封锁时才成立 ——
     // 文案现在必须把两种情形分开说，别再让用户无脑换号。
     assert.match(out.error.message, /这一个账号/, "先告诉用户这是账号级的")
     assert.match(out.error.message, /多个账号/, "再说明什么情况才是通道级")
     assert.match(out.error.message, /换账号也没用/, "通道级时换号确实没用")
     assert.match(out.error.message, /remote/, "要指路手机会话域的 WS 通道")
+    assert.doesNotMatch(out.error.message, /设备硬拉黑/, "限流分支不该说设备拉黑")
   } finally {
+    if (prev === undefined) delete process.env.MARVIS_HARD_BLOCK_MS
+    else process.env.MARVIS_HARD_BLOCK_MS = prev
     s.restore()
   }
 })
