@@ -1,6 +1,6 @@
 {
   "name": "magpie-marvis-final",
-  "version": "0.9.10",
+  "version": "0.9.11",
   "description": "Final magpie / OpenCode provider plugin for Tencent Marvis: DeepSeek V4.1 Flash / V4 Pro, Claude Sonnet/Opus 4.6, GPT-5.4, Hy3 and HY-Vision 2.0, delivered through a local OpenAI-compatible gateway (works on PC and phone via Termux/PRoot), PC HTTP direct, or openclaw WS transport — with per-request Beacon uskey signing, risk-cooldown breaker and a 4100406 first-line guard.",
   "type": "module",
   "main": "./index.mjs",

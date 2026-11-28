@@ -1,3 +1,12 @@
+## 0.9.11 — 2026-11-28
+
+**reasoning 全部丢弃：PC agent 卡死时倒出的工具调用 JSON / 重复段落不再显示**
+
+- **背景**：v0.9.10 把 REASONING_* 分离到 reasoning_content，但 PC agent 卡在重试循环时（设备号被腾讯硬拉黑，BUG #7），思考内容本身是脏的——实测 24115 帧 reasoning 里全是 `_tool_call_intent` 工具调用 JSON 和重复段落（"现在在…找域名邮箱"重复多遍），正文只有 2550 帧。这些作为 reasoning_content 显示出来仍是用户看到的"乱码"。
+- **修复**：`gateway.mjs` 新增导出 `isReasoningEvent(evName)`；AG-UI 流里所有 `REASONING_*` 事件**直接丢弃**（`return`），既不进 `content`，也不产生 `reasoning_content`。openclaw 侧的 reasoning_content 通道从此无输入，保留仅为兼容。
+- **效果**：思考面板为空，乱码消失；正文只保留真正的回答（若 agent 卡死则无输出，但不再有乱码）。注意这不解决设备号封锁——marvis 要真正出答案仍需换服务端签发的新 qimei36。
+- **测试**：`tests/ws-reasoning-content.test.mjs` 更新为 4 例（REASONING_* 全命中、正文事件不误丢、openclaw 通道兼容）；全量 **473 测试 / 468 pass / 0 fail / 5 skipped**。
+
 ## 0.9.10 — 2026-11-28
 
 **真修复：WS relay 把 PC agent 的 REASONING_CONTENT 当正文（乱码根因）**

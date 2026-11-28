@@ -1,4 +1,9 @@
 // gateway.mjs —— 本地 xiaobao 网关（Marvis PC 客户端）的 AG-UI 通道
+
+/** 0.9.11：AG-UI 事件是否为 reasoning（思考）——命中即丢弃，不进正文也不进 reasoning_content。 */
+export function isReasoningEvent(evName) {
+  return /^REASONING(?:_MESSAGE)?(?:_|$)/i.test(String(evName ?? ""))
+}
 //
 // 2026-11-23 实测确认的协议（不是 openclaw 的 method:connect）：
 //
@@ -314,16 +319,13 @@ export async function* gatewayChatStream(creds, payload, { signal, conversationI
       }
 
       const hasModel = Boolean(d.model)
-      // 0.9.10：PC 客户端的 AG-UI 流把思考作为独立的 REASONING_* 事件发出
-      // （实测 MarvisHost.log：REASONING_CONTENT 24115 帧 / TEXT_MESSAGE_CONTENT 2550 帧），
-      // 每帧同样带 delta。此前不分类，思考被当成正文 yield —— 用户看到满屏「乱码」。
-      // 这里把 reasoning 走独立字段，让上层把它放进 reasoning_content 而非 content。
-      const isReasoning = /^REASONING(?:_MESSAGE)?(?:_|$)/i.test(evName)
+      // 0.9.11：reasoning 全部丢弃。
+      // PC agent 卡在重试循环时，思考里会倒出大量工具调用 JSON（_tool_call_intent）
+      // 和重复段落 —— 实测 REASONING_CONTENT 24115 帧 vs 正文 2550 帧。这些不是正常
+      // 思考，展示出来就是用户看到的「乱码」。直接吞掉：既不进 content，也不产生
+      // reasoning_content。openclaw 侧的 reasoning 通道从此无输入，保留仅为兼容。
+      if (isReasoningEvent(evName)) return
       if (typeof d.delta === "string" && d.delta) {
-        if (isReasoning) {
-          pushFrame({ reasoning: d.delta, ...(hasModel ? { model: d.model } : {}) })
-          return
-        }
         const frame = { delta: d.delta, ...(hasModel ? { model: d.model } : {}) }
         const hitRisk = RISK_RE.test(d.delta)
         if (hitRisk) {
