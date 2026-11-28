@@ -206,23 +206,9 @@ if (pkg) {
      "publish-npm 脚本存在",
      "有 publish:npm 脚本但没有文件，npm run publish:npm 会直接失败",
      "从脚手架复制 scripts/publish-npm.mjs，改 PUBLISH_AS 为 npm 包名")
-  const releaseYml = join(ROOT, ".github", "workflows", "release.yml")
-  if (existsSync(releaseYml)) {
-    const releaseSrc = readFileSync(releaseYml, "utf8")
-    ok(/NPM_TOKEN/.test(releaseSrc),
-       "release.yml 引用 NPM_TOKEN",
-       "没有 secret 门，CI 的 npm 步骤会静默跳过（假绿），用户以为已发布",
-       "在 release.yml 的 npm 步骤加 env: NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}")
-    ok(/npm view/.test(releaseSrc) && /(版本已存在|already published|skipping)/i.test(releaseSrc),
-       "release.yml 有「npm 版本已存在则跳过」守卫",
-       "本地 release.mjs 先发过、tag 触发 workflow 再发会 E409 变红；守卫要查 npm view 后 exit 0",
-       "在 npm 步骤前加：npm view \"$NPM_NAME@$VERSION\" version && exit 0")
-  } else {
-    warn(false,
-       "release.yml 不存在（git 源按 HEAD 分发，不依赖 Release）",
-       "没有 release.yml 就没有 tag/Release/npm 的门禁",
-       "从脚手架复制 .github/workflows/release.yml")
-  }
+  // ②c Release 自动化：**本仓库按 git 源（HEAD）分发，不使用 tag / GitHub Release / release workflow**
+  //    （2026-11-29 已删除 `.github/workflows/release.yml` 与 `scripts/release.mjs`），
+  //    所以这里不再校验 release.yml —— 没有它是有意为之，不是缺失。
 
   // ── ③ 能不能被搜到 ────────────────────────────────────────────────
   const kw = Array.isArray(pkg.keywords) ? pkg.keywords.map((k) => String(k).toLowerCase()) : []

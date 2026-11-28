@@ -48,23 +48,28 @@ if (!warn(isGit, "是 git 仓库", "维护依赖版本历史；没有 git 就只
   report()
 }
 
-// ── ② 有没有发布过 ──────────────────────────────────────────────────
+// ── ② tag / Release 策略：本仓库**不使用** tag 与 GitHub Release ─────
+// 2026-11-29 起按 git HEAD 分发：tag 与 Releases 全空是有意为之
+// （`.github/workflows/release.yml` 与 `scripts/release.mjs` 已删除）。
+// 所以「没打 tag」不再是失败项。若以后回到 tag 发布，把 else 分支的
+// results.push 换回 ok(...) 即可。
 
-const lastTag = git(["describe", "--tags", "--abbrev=0", "--match", "v*"])
 const tags = (git(["tag", "--list", "v*", "--sort=-v:refname"]) ?? "").split("\n").filter(Boolean)
-
-if (!warn(!!lastTag, "至少打过一次 tag", "没有 tag ⇒ GitHub 右侧永远写着「暂无发布版本」，用户看不到改了什么", "git tag v" + version + " && git push origin v" + version)) {
-  report()
-}
-
-// ── ③ 当前 version 有没有对应的 tag ──────────────────────────────────
-// 「发了新版本但没打 tag」是最常见的一种：本地全对，用户拿不到。
-
+const lastTag = tags[0] ?? null
 const currentTag = `v${version}`
-ok(tags.includes(currentTag),
-   `当前版本 ${version} 有 tag（${currentTag}）`,
-   "版本号改了但没打 tag ⇒ 用户看 Release 是空的；npm 有、git 源没有",
-   `git tag ${currentTag} && git push origin ${currentTag}`)
+
+if (tags.length === 0) {
+  results.push({
+    level: "pass",
+    name: "不使用 tag / GitHub Release（按 git HEAD 分发）",
+    note: "Releases 为空是设计选择，不是遗漏：用户直接从仓库取最新 HEAD",
+  })
+} else {
+  ok(tags.includes(currentTag),
+     `当前版本 ${version} 有 tag（${currentTag}）`,
+     "既然已有 tag 体系，却漏打当前版本 ⇒ 用户看到的版本会落后",
+     `git tag ${currentTag} && git push origin ${currentTag}`)
+}
 
 // ── ④ 自上次 tag 以来，代码变了但版本没变 ────────────────────────────
 // 这就是「直接覆盖仓库不发新版本」：git 源的用户永远停在旧 commit，
@@ -80,15 +85,24 @@ const changedSince = (() => {
   return [...new Set([...committed, ...dirty])].filter((f) => CODE.test(f) && !f.startsWith("package-lock"))
 })()
 
-const versionBumped = `v${version}` !== lastTag
-if (changedSince.length > 0) {
-  ok(versionBumped,
-     "自上次 tag 以来改了代码 ⇒ 版本号也跟着变了",
-     `改了 ${changedSince.length} 个代码文件但 version 还是 ${lastTag?.slice(1)} —— ` +
-     `magpie 比的是版本号，相等就认为「没有更新」，git 源的用户永远停在旧 commit`,
-     `改完就 bump：npm version patch --no-git-tag-version（然后按 UPDATING 七步走）`)
+// 无 tag 体系时本条不适用：没有「上次发布」这个基准
+if (!lastTag) {
+  results.push({
+    level: "pass",
+    name: "无 tag 基准 ⇒ 跳过「版本号是否跟上代码」检查",
+    note: "按 git HEAD 分发时，版本号只用于显示，不参与更新判定",
+  })
 } else {
-  warn(true, "自上次 tag 以来没有代码改动", "要么还没开始改，要么已经发布过了", "")
+  const versionBumped = `v${version}` !== lastTag
+  if (changedSince.length > 0) {
+    ok(versionBumped,
+       "自上次 tag 以来改了代码 ⇒ 版本号也跟着变了",
+       `改了 ${changedSince.length} 个代码文件但 version 还是 ${lastTag?.slice(1)} —— ` +
+       `magpie 比的是版本号，相等就认为「没有更新」，git 源的用户永远停在旧 commit`,
+       `改完就 bump：npm version patch --no-git-tag-version（然后按 UPDATING 七步走）`)
+  } else {
+    warn(true, "自上次 tag 以来没有代码改动", "要么还没开始改，要么已经发布过了", "")
+  }
 }
 
 // ── ⑤ CHANGELOG 有没有当前版本这一节 ─────────────────────────────────
