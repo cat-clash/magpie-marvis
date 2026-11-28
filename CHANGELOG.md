@@ -1,3 +1,15 @@
+## 0.9.10 — 2026-11-28
+
+**真修复：WS relay 把 PC agent 的 REASONING_CONTENT 当正文（乱码根因）**
+
+- **现象**：只有走 marvis 插件（`group/qq` → WS relay → PC 客户端 `agent.run`）时，回答正文里出现 "Interpretation:…" / "Let me do:" / 工具调用 JSON 这类英文思考，看起来像乱码；其他 provider 正常。
+- **根因（实测确认）**：PC 客户端的 AG-UI 流把思考作为**独立事件**发出——`MarvisHost.bak.log` 里 `REASONING_CONTENT` **24115** 帧、`TEXT_MESSAGE_CONTENT` 2550 帧，每帧结构为 `{"type":"REASONING_CONTENT","delta":"…","event":"ag_ui_event"}`。插件 `gateway.mjs:317` 只判断 `typeof d.delta === "string"`，不检查事件类型，于是把所有思考 delta 当正文 yield；`openclaw.mjs` 再把它们包成 `content`。其他 provider 走标准 OpenAI API，`reasoning_content` 是独立字段，DSH 原生分离——所以只有 marvis 有这个问题。
+- **修复**：
+  - `gateway.mjs`：AG-UI 事件按 `evName` 分流，`REASONING_*` 的 delta 放进 frame 的 `reasoning` 字段，不再进 `delta`。
+  - `openclaw.mjs`：`openclawStreamResponse` 把 `reasoning` 发成 `reasoning_content` chunk；`openclawChat` 单独累计 reasoning；`openclawResponse` 在流式/非流式都输出 `reasoning_content`。无思考时保持原单帧格式（兼容现有客户端）。
+- **验证**：新增 `tests/ws-reasoning-content.test.mjs`（3 例：非流式分离、无思考兼容、流式 chunk 分流）；全量 **472 测试 / 467 pass / 0 fail / 5 skipped**。
+- **说明**：v0.9.9 的 `reasoning_effort` 归一化对 WS relay 无效（该通道不转发此字段），本版才是根治。两版都保留，无冲突。
+
 ## 0.9.9 — 2026-11-28
 
 **修复：WS relay 通道缺 reasoning_effort 归一化，模型思考漏进正文（显示为「乱码」）**

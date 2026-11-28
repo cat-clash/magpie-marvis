@@ -287,6 +287,11 @@ export function openclawStreamResponse(payload, frames, { model } = {}) {
           if (typeof f?.delta === "string" && f.delta) {
             ctrl.enqueue(enc.encode(chunk({ content: f.delta })))
           }
+          // 0.9.10：PC agent 的 REASONING_* 事件走独立通道，放进 reasoning_content，
+          // 不再混进 content —— DSH 等客户端会把它收进思考区，正文保持干净。
+          if (typeof f?.reasoning === "string" && f.reasoning) {
+            ctrl.enqueue(enc.encode(chunk({ reasoning_content: f.reasoning })))
+          }
         }
         ctrl.enqueue(enc.encode(chunk({}, "stop")))
         ctrl.enqueue(enc.encode("data: [DONE]\n\n"))
@@ -348,25 +353,36 @@ export async function openclawChat(creds, payload, opts = {}) {
   // relay 经 gateway 通道，默认模型名沿用 gateway 的 "marvis-gateway"（0.9.8 起无 remote）
   const fallbackModel = "marvis-gateway"
   let text = ""
+  let reasoning = ""
   let usedModel = ""
   for await (const frame of openclawChatStream(creds, payload, opts)) {
     if (typeof frame?.delta === "string" && frame.delta) text += frame.delta
+    if (typeof frame?.reasoning === "string" && frame.reasoning) reasoning += frame.reasoning
     if (frame?.model) usedModel = frame.model
   }
-  return { text, model: usedModel || payload?.model || fallbackModel }
+  return { text, reasoning, model: usedModel || payload?.model || fallbackModel }
 }
 
 /** 把 openclaw 结果包成 OpenAI 兼容的 Response（流 / 非流都支持） */
-export function openclawResponse(payload, { text, model }) {
+export function openclawResponse(payload, { text, reasoning, model }) {
   const id = `chatcmpl-${hex32().slice(0, 12)}`
   const ts = Math.floor(Date.now() / 1000)
   const usedModel = model || payload?.model || "marvis-gateway"
+  const think = typeof reasoning === "string" && reasoning ? reasoning : ""
   if (payload?.stream) {
     // 与 openclawStreamResponse 共用同一套 chunk 构造（格式零分叉）
     const chunk = chatChunkSse({ id, created: ts, model: usedModel })
     const body = new ReadableStream({
       start(ctrl) {
-        ctrl.enqueue(new TextEncoder().encode(chunk({ role: "assistant", content: text })))
+        if (think) {
+          // 有思考：先发 reasoning_content，再发正文（DSH 把思考收进思考区）
+          ctrl.enqueue(new TextEncoder().encode(chunk({ role: "assistant", content: "" })))
+          ctrl.enqueue(new TextEncoder().encode(chunk({ reasoning_content: think })))
+          ctrl.enqueue(new TextEncoder().encode(chunk({ content: text })))
+        } else {
+          // 无思考：保持原有单帧格式，避免破坏现有客户端/测试
+          ctrl.enqueue(new TextEncoder().encode(chunk({ role: "assistant", content: text })))
+        }
         ctrl.enqueue(new TextEncoder().encode(chunk({}, "stop")))
         ctrl.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
         ctrl.close()
@@ -382,7 +398,7 @@ export function openclawResponse(payload, { text, model }) {
     object: "chat.completion",
     created: ts,
     model: usedModel,
-    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+    choices: [{ index: 0, message: { role: "assistant", content: text, ...(think ? { reasoning_content: think } : {}) }, finish_reason: "stop" }],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   })
 }

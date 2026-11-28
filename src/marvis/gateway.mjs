@@ -314,7 +314,16 @@ export async function* gatewayChatStream(creds, payload, { signal, conversationI
       }
 
       const hasModel = Boolean(d.model)
+      // 0.9.10：PC 客户端的 AG-UI 流把思考作为独立的 REASONING_* 事件发出
+      // （实测 MarvisHost.log：REASONING_CONTENT 24115 帧 / TEXT_MESSAGE_CONTENT 2550 帧），
+      // 每帧同样带 delta。此前不分类，思考被当成正文 yield —— 用户看到满屏「乱码」。
+      // 这里把 reasoning 走独立字段，让上层把它放进 reasoning_content 而非 content。
+      const isReasoning = /^REASONING(?:_MESSAGE)?(?:_|$)/i.test(evName)
       if (typeof d.delta === "string" && d.delta) {
+        if (isReasoning) {
+          pushFrame({ reasoning: d.delta, ...(hasModel ? { model: d.model } : {}) })
+          return
+        }
         const frame = { delta: d.delta, ...(hasModel ? { model: d.model } : {}) }
         const hitRisk = RISK_RE.test(d.delta)
         if (hitRisk) {
