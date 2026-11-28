@@ -324,7 +324,14 @@ export async function* gatewayChatStream(creds, payload, { signal, conversationI
       // 和重复段落 —— 实测 REASONING_CONTENT 24115 帧 vs 正文 2550 帧。这些不是正常
       // 思考，展示出来就是用户看到的「乱码」。直接吞掉：既不进 content，也不产生
       // reasoning_content。openclaw 侧的 reasoning 通道从此无输入，保留仅为兼容。
-      if (isReasoningEvent(evName)) return
+      // 0.9.13：REASONING_* 事件走独立 reasoning 通道（DSH 收进可折叠的思考区），
+      // 不再直接丢弃 —— 用户要的是「可折叠」，不是「彻底不可见」。
+      if (isReasoningEvent(evName)) {
+        if (typeof d.delta === "string" && d.delta) {
+          pushFrame({ reasoning: d.delta, ...(hasModel ? { model: d.model } : {}) })
+        }
+        return
+      }
       if (typeof d.delta === "string" && d.delta) {
         const frame = { delta: d.delta, ...(hasModel ? { model: d.model } : {}) }
         const hitRisk = RISK_RE.test(d.delta)

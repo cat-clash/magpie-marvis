@@ -1,3 +1,15 @@
+## 0.9.13 — 2026-11-28
+
+**revert「思考全丢弃」+ 正文流按行切分：英文思考进 reasoning_content（可折叠），中文回答留在正文**
+
+- **为什么改**：0.9.11 把 `REASONING_*` 事件整段丢弃，思考面板从此空白——但 PC agent 还有**第二条通路**：它把推理、重试、最终回答**拼进同一个 `TEXT_MESSAGE_CONTENT` 文本流**（实测一个 assistant message 里 16193 字符、单一 text 块，思考与正文无结构边界）。丢弃 reasoning 事件对这条通路完全无效，用户端仍是满屏英文。
+- **修复一（传输层）**：`gateway.mjs` 的 `REASONING_*` 事件从「直接 `return` 丢弃」改为 `pushFrame({ reasoning })`，交给上层输出 `reasoning_content` —— 客户端收进可折叠的思考区，而不是彻底不可见。
+- **修复二（内容层）**：新增 `src/marvis/thinking-split.mjs`（`classifyLine` / `createLineSplitter` / `splitFullText`），按**行**保守分类：行内命中英文思考句式开头（`The user` / `Let me` / `Hmm` …）+ 中文字符占比 < 5% + 英文词数 ≥ 12，三条同时满足才判为思考 → 移入 `reasoning_content`；任何含中文正文的行一律留在 `content`。
+- **接线**：`openclaw.mjs` 的流式（`openclawStreamResponse`）与非流式（`openclawChat` / `openclawResponse`）两条路径都接同一套切分；`openclawResponse` 内部再切一次（幂等），保证任何调用方传原始 text 也安全。
+- **流式实时性**：splitter 一旦判定进入正文（出现含中文且非思考句式的行）立即转「直通」状态，之后每个 delta 原样放行 —— 不会因为等换行把整段回复憋到最后（`gateway-stream` 的逐 delta 断言仍通过）。
+- **防误伤兜底**：① 重复思考行按前 140 字去重（PC agent 重试会把同一段叠两遍）；② 若切完正文一字符不剩（全文英文回答被误判），整段还给 `content`，绝不返回空回答。
+- **测试**：新增 `tests/thinking-split.test.mjs`（13 例：分类边界、跨 delta 半行、去重、兜底、流式/非流式分离）；全量 **490 测试 / 485 pass / 1 fail（环境预存：mock gateway 需要 python，本机缺）/ 4 skipped**。
+
 ## 0.9.12 — 2026-11-28
 
 **根治「另一个对话框也能看到的乱码」：标题生成请求本地返回，不再走 marvis**

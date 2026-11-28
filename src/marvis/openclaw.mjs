@@ -21,6 +21,8 @@ import { createRequire } from "node:module"
 import { dirname, join, resolve, basename } from "node:path"
 import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
+// 0.9.13：PC agent 把英文思考混进正文流 —— 按行切分，思考进 reasoning_content（可折叠）。
+import { createLineSplitter, splitFullText } from "./thinking-split.mjs"
 import { homedir } from "node:os"
 
 const require = createRequire(import.meta.url)
@@ -279,13 +281,20 @@ export function openclawStreamResponse(payload, frames, { model } = {}) {
     async start(ctrl) {
       ctrl.enqueue(enc.encode(chunk({ role: "assistant", content: "" })))
       try {
+        // 0.9.13：正文流按行切分 —— 几乎不含中文的英文「思考行」进 reasoning_content
+        // （客户端折叠显示、不占正文），中文回答原样留在 content。
+        const splitter = createLineSplitter()
+        const emitPart = (kind, text) => {
+          if (typeof text !== "string" || text === "") return
+          ctrl.enqueue(enc.encode(chunk(kind === "reasoning" ? { reasoning_content: text } : { content: text })))
+        }
         for await (const f of frames) {
           if (f?.model && f.model !== usedModel) {
             usedModel = f.model
             chunk = chatChunkSse({ id, created, model: usedModel })
           }
           if (typeof f?.delta === "string" && f.delta) {
-            ctrl.enqueue(enc.encode(chunk({ content: f.delta })))
+            for (const part of splitter.feed(f.delta)) emitPart(part.kind, part.text)
           }
           // 0.9.10：PC agent 的 REASONING_* 事件走独立通道，放进 reasoning_content，
           // 不再混进 content —— DSH 等客户端会把它收进思考区，正文保持干净。
@@ -293,6 +302,7 @@ export function openclawStreamResponse(payload, frames, { model } = {}) {
             ctrl.enqueue(enc.encode(chunk({ reasoning_content: f.reasoning })))
           }
         }
+        for (const part of splitter.flush()) emitPart(part.kind, part.text)
         ctrl.enqueue(enc.encode(chunk({}, "stop")))
         ctrl.enqueue(enc.encode("data: [DONE]\n\n"))
       } catch {
@@ -360,7 +370,13 @@ export async function openclawChat(creds, payload, opts = {}) {
     if (typeof frame?.reasoning === "string" && frame.reasoning) reasoning += frame.reasoning
     if (frame?.model) usedModel = frame.model
   }
-  return { text, reasoning, model: usedModel || payload?.model || fallbackModel }
+  // 0.9.13：非流式路径同样切分，保证流式/非流式行为一致。
+  const split = splitFullText(text)
+  const mergedReasoning = [reasoning, split.reasoning]
+    .filter((x) => typeof x === "string" && x.trim())
+    .join("\n")
+    .trim()
+  return { text: split.content, reasoning: mergedReasoning, model: usedModel || payload?.model || fallbackModel }
 }
 
 /** 把 openclaw 结果包成 OpenAI 兼容的 Response（流 / 非流都支持） */
@@ -368,7 +384,14 @@ export function openclawResponse(payload, { text, reasoning, model }) {
   const id = `chatcmpl-${hex32().slice(0, 12)}`
   const ts = Math.floor(Date.now() / 1000)
   const usedModel = model || payload?.model || "marvis-gateway"
-  const think = typeof reasoning === "string" && reasoning ? reasoning : ""
+  // 0.9.13：即使调用方传的是未切分的原始 text，这里也再切一次（幂等）——
+  // 保证英文「思考行」永远进 reasoning_content，正文只留中文回答。
+  const split = splitFullText(String(text ?? ""))
+  const bodyText = split.content
+  const think = [reasoning, split.reasoning]
+    .filter((x) => typeof x === "string" && x.trim())
+    .join("\n")
+    .trim()
   if (payload?.stream) {
     // 与 openclawStreamResponse 共用同一套 chunk 构造（格式零分叉）
     const chunk = chatChunkSse({ id, created: ts, model: usedModel })
@@ -378,10 +401,10 @@ export function openclawResponse(payload, { text, reasoning, model }) {
           // 有思考：先发 reasoning_content，再发正文（DSH 把思考收进思考区）
           ctrl.enqueue(new TextEncoder().encode(chunk({ role: "assistant", content: "" })))
           ctrl.enqueue(new TextEncoder().encode(chunk({ reasoning_content: think })))
-          ctrl.enqueue(new TextEncoder().encode(chunk({ content: text })))
+          ctrl.enqueue(new TextEncoder().encode(chunk({ content: bodyText })))
         } else {
           // 无思考：保持原有单帧格式，避免破坏现有客户端/测试
-          ctrl.enqueue(new TextEncoder().encode(chunk({ role: "assistant", content: text })))
+          ctrl.enqueue(new TextEncoder().encode(chunk({ role: "assistant", content: bodyText })))
         }
         ctrl.enqueue(new TextEncoder().encode(chunk({}, "stop")))
         ctrl.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
@@ -398,7 +421,7 @@ export function openclawResponse(payload, { text, reasoning, model }) {
     object: "chat.completion",
     created: ts,
     model: usedModel,
-    choices: [{ index: 0, message: { role: "assistant", content: text, ...(think ? { reasoning_content: think } : {}) }, finish_reason: "stop" }],
+    choices: [{ index: 0, message: { role: "assistant", content: bodyText, ...(think ? { reasoning_content: think } : {}) }, finish_reason: "stop" }],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   })
 }
