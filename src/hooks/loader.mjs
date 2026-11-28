@@ -1163,9 +1163,9 @@ export function loaderHook(input, options = {}) {
         // 只在错误 code 上补一条人能直接执行的 hint。
         if (response.status === 503 || response.status === 502) {
           const gwHint =
-            "Marvis 503 诊断：先看 8088 是否监听与账号池是否为空。Termux 执行 " +
-            "sh ~/.magpie-marvis-native/magpie-marvis-diag.sh；若 8088 未监听，" +
-            "在手机网关目录执行 sh phone-setup.sh（或 cd Marvis-proxy-public && sh run.sh start）。" +
+            "Marvis 503 诊断：先看 8088 是否监听、账号池是否为空。启动网关：" +
+            "在 Termux / PRoot 里 cd 到本插件的 gateway/ 目录执行 sh run.sh（或 python serve.py）；" +
+            "再打开 http://127.0.0.1:8088/ 控制台加号登录 Marvis（账号池为空会回 503 no_account）。" +
             "若仍失败，确认 gateway.json.mode=gateway、url=http://127.0.0.1:8088/v1。" +
             "注意 ws://127.0.0.1:10123/ 是 PC AG-UI relay，手机端请走 8088 HTTP 网关。"
           const cloned = response.clone()
@@ -1185,7 +1185,7 @@ export function loaderHook(input, options = {}) {
           }
           if (!errBody.error.code) errBody.error.code = "gateway_unavailable"
           errBody.error.diagnosis_hint = gwHint
-          errBody.error.diagnose_command = "sh ~/.magpie-marvis-native/magpie-marvis-diag.sh"
+          errBody.error.diagnose_command = "node <插件目录>/scripts/cli.mjs doctor"
           return new Response(JSON.stringify(errBody), {
             status: response.status,
             headers: { "content-type": "application/json", "x-marvis-diagnosis": "gateway-503" },

@@ -312,6 +312,17 @@ python clear_cache.py     # 仓库根的脚本，一次清掉上面三处
 - `remote` wss 手机会话域传输（抓 handshake.log 那条路，凭据 15–20 分钟就失效）
 - Android FFI / 手机出票相关代码
 
+> ⚠ **如果你现在手机上还能点 QQ / 微信登录，说明装的是 `0.8.9` 旧版**——仓库里 `0.9.x`
+> 已不含这些代码（`src/marvis/mobile-login.mjs`、`phone-setup.sh`、`build-phone-kit.mjs`
+> 都已不存在）。确认方法：
+>
+> ```bash
+> node -e "console.log(require('./node_modules/magpie-marvis-final/package.json').version)"  # 或
+> grep '"version"' ~/.config/magpie/plugins/node_modules/magpie-marvis-final/package.json
+> ```
+>
+> 0.9.x 里手机端只保留「插件 + 本地网关」这一种组合。
+
 **现在手机怎么用**：走 `gateway` 通道 —— 在 Termux / PRoot 里跑本仓库的 `gateway/serve.py`，
 账号池与出票都在网关侧维护，插件本体不依赖任何 Windows 原生组件：
 

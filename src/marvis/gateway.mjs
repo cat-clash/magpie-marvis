@@ -80,10 +80,12 @@ function relayHint(url) {
   if (mobile) {
     return (
       `${base}：${maskUrl(url)} 是 **Marvis PC 客户端**的端口，手机上没有这个进程。\n` +
-      "手机上有两条可走的路（任选其一）：\n" +
-      "  1. 跑本地 Python 网关（推荐）：在 Termux 里执行 phone-kit 的 sh phone-setup.sh，" +
-      "它会写 ~/.magpie-marvis-native/gateway.json 并起网关；插件随后自动走它；\n" +
-      "  2. 走手机会话域：设置 MARVIS_WS_MODE=remote 并提供 MARVIS_HANDSHAKE（抓包文件）。"
+      "手机上唯一可走的是本地 Python 网关（0.9.8 起 remote 手机会话域通道已移除）：\n" +
+      "  1. Termux / PRoot 里 cd 到本插件的 gateway/ 目录，执行 sh run.sh（或 python serve.py），" +
+      "监听 127.0.0.1:8088；\n" +
+      "  2. 控制台 http://127.0.0.1:8088/ 里加号登录 Marvis（账号池为空会回 503 no_account）；\n" +
+      "  3. 写 ~/.magpie-marvis-native/gateway.json：" +
+      "{\"mode\":\"gateway\",\"url\":\"http://127.0.0.1:8088/v1\"}，插件随后自动走它。"
     )
   }
   return `${base}：确认 Marvis PC 客户端已打开（它负责监听这个端口）。`
