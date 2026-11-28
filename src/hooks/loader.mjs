@@ -82,6 +82,28 @@ const MODEL_ISSUE =
 /** 风控（uskey 配额用完 / 缺 MarvisExt）—— 可重试，但要换新 uskey */
 const RISK_BLOCK = /4100404|风控拦截/
 
+/**
+ * 4100404 的**耗时判据**：区分「设备被硬拉黑」与「节奏/预算限流」（0.9.5）。
+ *
+ * 出处与实测（2026-11-28，本机）：
+ *   403 + 4100404 且响应 **< 800ms**  ⇒ 设备被**硬拉黑**（服务端在业务逻辑之前就按
+ *                                      设备号拒掉）——换账号 / 换 IP / 切 WS / 等冷却
+ *                                      全都无效，重试只是白撞。
+ *   403 + 4100404 且响应 **≥ 800ms**  ⇒ 触发频率或预算限制，冷却后可恢复。
+ *
+ * 实测硬拉黑签名：连续 5 发分别为 307 / 100 / 76 / 73 / 75 ms（硬拉黑特征「75–130ms
+ * 内秒拒」，完全吻合）；同期 relay、HTTP 直连、官方 PC 客户端三条通道共享同一设备号、
+ * 在同一秒被拦。
+ *
+ * 每次调用现读 env（测试需要按用例切换分支）；0 = 关闭判定。
+ */
+function hardBlockThreshold() {
+  const raw = String(process.env.MARVIS_HARD_BLOCK_MS ?? "").trim()
+  if (raw === "0") return 0
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : 800
+}
+
 /** 登录态过期 */
 const AUTH_EXPIRED = /4100403|登录态过期|未登录/
 
@@ -878,24 +900,41 @@ export function loaderHook(input, options = {}) {
           return modelUnavailableResponse(unavailableModel)
         }
 
-        // 风控熔断中（HTTP 直连路径）：本地 429，请求不出网 ——
+        // 风控熔断中：本地 429，请求不出网 ——
         // 让账号自然冷却，而不是陪着宿主的默认重试策略把冷却时间撞得更长（issue #71）。
-        // WS（remote/relay）走的是手机会话域，另一个风控域，不受此熔断约束。
         // 0.8.0 起熔断按账号分桶：这里只挡**当前这个账号**，其他账号照常出网。
         // 例外是全局桶（跨账号共因闸）：多个不同账号接连被拦 → 判定通道级封锁 → 全体暂停。
-        if (!openclawEnabled() && (breaker.open || channelBreaker.open)) {
+        //
+        // ⚠ 0.9.5 修正（本行曾是 `!openclawEnabled() && (...)`）：
+        //   旧版让 **WS 通道（relay / remote）完全绕过熔断闸**，理由是「WS 走手机会话域，
+        //   是另一个风控域」。2026-11-28 实测证伪 —— relay、HTTP 直连、**官方 PC 客户端**
+        //   三条通道被**同一秒**、同一设备号（qimei36）一起拦下；`risk_control_blocked`
+        //   与 HTTP 的 4100404 同源。而 WS 路径**自己已经在 `breaker.record(false)`**
+        //   （见下方 risk_control_blocked 分支）——即「记了失败，却没有任何一处读它」，
+        //   熔断器在 WS 下是一段死代码。
+        //   实测后果：宿主默认重试 7 次，一次用户请求 = 7 次真实撞击上游
+        //   （usage.jsonl 每条 34.8s ÷ 单次 ~4.95s ≈ 7），而 breaker-state.json 的
+        //   `failures` 全程为 0 —— 熔断从未生效。
+        //   现在熔断闸对所有传输生效。确需旧行为可设 MARVIS_RISK_GATE_WS=0（不推荐：
+        //   那正是把冷却时间撞长的原因）。
+        const gateWs = String(process.env.MARVIS_RISK_GATE_WS ?? "").trim() !== "0"
+        if ((gateWs || !openclawEnabled()) && (breaker.open || channelBreaker.open)) {
           const channelWide = channelBreaker.open && channelBreaker !== breaker
           const gate = channelWide ? channelBreaker : breaker
           const minutes = Math.ceil(gate.retryAfterMs / 60_000)
           const message = channelWide
             ? `通道级风控冷却中：多个不同账号接连被 4100404 拦住，判定拦的是通道（uskey / UA / IP / ` +
               `上游节点），插件已暂停**所有账号**出网 ${minutes} 分钟。换账号没用 —— ` +
-              "该换 IP、重签 uskey，或设 MARVIS_WS_MODE=remote 改走 WS 通道。" +
+              "该换 IP、重签 uskey。" +
+              "⚠ 2026-11-28 实测：relay / remote / HTTP 直连是同源风控域，三者会被同一设备号一起拦，" +
+              "**不要**以为切 WS 就能绕（旧文案的误导已删）。真正能换的是**设备号 qimei36**（须服务端签发）。" +
               "MARVIS_RISK_CONSENSUS=0 可关闭这个共因闸（此后纯按账号隔离）。"
             : `账号「${acctLabel}」风控冷却中：连续 ${breaker.failures} 次被 4100404 拦截，` +
               `插件已暂停这个账号出网 ${minutes} 分钟` +
-              "（**其他账号不受影响**；换 IP/UA 无效，等冷却结束，或给这个账号设 " +
-              "MARVIS_WS_MODE=remote 改走 WS 通道）。" +
+              "（**其他账号不受影响**；换 IP/UA 无效，等冷却结束）。" +
+              "⚠ 2026-11-28 实测：若 qimei36 已被硬拉黑（403 在 <800ms 内秒回），" +
+              "换账号 / 换 IP / 切 WS 通道 / 等冷却**全都无效**，只能换服务端签发的设备号。" +
+              "判定命令见 KNOWN_ISSUES.md BUG #7。" +
               "MARVIS_RISK_COOLDOWN_MS=0 可禁用熔断；MARVIS_RISK_SCOPE=global 可退回全局冷却；" +
               "node scripts/cli.mjs breaker reset <账号> 可立刻解封。"
           // 0.8.2：若父进程继承了 MARVIS_WS_MODE=off 覆盖了 openclaw.json 的 relay，
@@ -907,14 +946,20 @@ export function loaderHook(input, options = {}) {
         }
 
         let response
+        let upstreamStartedAt = 0
         try {
           // ── 请求节奏闸（0.7.0）─────────────────────────────────────
           // 风控看的是**请求节奏分布**，熔断只是撞了之后的止损；压平节奏才是预防。
-          // 只对 HTTP 直连补全请求生效：WS 通道是另一个风控域（手机会话域），
-          // 走它时不该被 HTTP 侧的节奏拖慢。
-          // 首帧前的这一次等待是本路径唯一的节流点；SSE 生产循环里不再插入等待
-          // （那里的抖动只会让流看起来卡顿，对节奏风控无意义）。
-          if (!openclawEnabled()) await pacingWait(acctBucket)
+          // ⚠ 0.9.5 修正：旧版只对 HTTP 直连生效，理由是「WS 是另一个风控域，不该被
+          //   HTTP 侧节奏拖慢」。2026-11-28 实测证伪（relay 与 HTTP 被同一设备号同一秒
+          //   拦下），故 WS 同样要压节奏 —— 同源风控域就该同源节流。
+          //   WS 上每轮是短连接、且 relay 会多轮展平，额外一次首帧前等待可接受。
+          //   确需旧行为可设 MARVIS_PACE_WS=0。
+          const paceWs = String(process.env.MARVIS_PACE_WS ?? "").trim() !== "0"
+          if (paceWs || !openclawEnabled()) await pacingWait(acctBucket)
+          // 0.9.5：给上游往返计时 —— 4100404 的**设备硬拉黑**与**节奏限流**靠耗时分流
+          // （判据见下方 RISK_HARD_BLOCK_MS）。计时从真正发出请求起算，不含上面的节奏等待。
+          upstreamStartedAt = Date.now()
           response = await callUpstream(body)
         } catch (err) {
           if (err instanceof HeaderUnavailable) {
@@ -1025,11 +1070,27 @@ export function loaderHook(input, options = {}) {
           //   连续 MARVIS_RISK_THRESHOLD（默认 5）次后熔断，请求根本不出网。
           //   旧行为可用 MARVIS_RISK_STATUS=503 找回。
           breaker.record(false)
+          // 0.9.5：按耗时分流「设备硬拉黑」与「节奏限流」——两者处置完全不同，
+          // 旧版一律说「账号级节奏风控，换账号/等冷却」，把硬拉黑用户引向无用的动作。
+          // 判定只改**文案与自动回退**，不额外升级熔断：record(false) 本身就会在
+          // 连续 5 次后开闸（阈值语义不变），立即 trip 会跳过退避链、也让宿主侧
+          // 的错误语义（429 vs 闸内 429）在两次响应间突兀切换。
+          const upstreamMs = upstreamStartedAt ? Date.now() - upstreamStartedAt : 0
+          const hardThreshold = hardBlockThreshold()
+          const hardBlocked = hardThreshold > 0 && upstreamMs > 0 && upstreamMs < hardThreshold
           const retryAfterSec = Math.max(1, Math.ceil(breaker.retryAfterMs / 1000) || 60)
           const status = Number.parseInt(String(process.env.MARVIS_RISK_STATUS ?? ""), 10) || 429
           const mobile = isMobile()
-          const baseMessage =
-            "上游风控拦截：Marvis 的 /v1/chat/completions 会校验 Ual-Access-MarvisExt.uskey "
+          const baseMessage = hardBlocked
+            ? `上游风控拦截（**设备硬拉黑**）：403 + 4100404 在 ${upstreamMs}ms 内秒回`
+              + `（< ${hardThreshold}ms 即判设备号已被拉黑）。`
+              + "此时服务端在业务逻辑之前就按**设备号 qimei36** 拒掉，"
+              + "换账号 / 换 IP / 切 WS 通道（relay / remote）/ 改首行 / 重装插件 / 等冷却**全都无效**。"
+              + "唯一出路是换一个**由腾讯服务端签发**的 qimei36（改 MAC 等本地手段只会让 qimei.dll"
+              + "进入「拒绝交付」分支返回空号，伪造 36-hex 则 100% 秒拒）。"
+              + "判定与修复详见 KNOWN_ISSUES.md BUG #7。"
+              + `原始返回：${text.slice(0, 300)}`
+            : "上游风控拦截：Marvis 的 /v1/chat/completions 会校验 Ual-Access-MarvisExt.uskey "
               + "是否按本次请求上下文（conv / resp / scene / model / nonce / openid）用 Beacon SDK 现算。"
               + "插件已按 bus_info 出票；若连续出现，检查 native/ 的 4 个文件是否齐全、qimei36 是否真实，"
               + "或设置 MARVIS_USKEY_URL 指向外部出票服务。"
@@ -1045,12 +1106,19 @@ export function loaderHook(input, options = {}) {
           let probeReachable = false
           let autoTried = false
           let autoError = ""
-          const autoEnabled = shouldAutoWsFallback({
-            mobile,
-            mode: String(process.env.MARVIS_WS_MODE ?? ""),
-            autoDisabled: String(process.env.MARVIS_RISK_AUTO_WS ?? "") === "0",
-            riskStatus: status,
-          })
+          // 0.9.5：设备已硬拉黑时不自动回退 WS —— relay 与 HTTP 是**同源风控域**，
+          // 2026-11-28 实测两者被同一设备号同一秒拦下，回退只会白白多打一次上游
+          // （实测 relay 也回 code=risk_control_blocked）。仍想试可设 MARVIS_RISK_AUTO_WS_HARD=1。
+          const skipAutoForHardBlock =
+            hardBlocked && String(process.env.MARVIS_RISK_AUTO_WS_HARD ?? "").trim() !== "1"
+          const autoEnabled =
+            !skipAutoForHardBlock &&
+            shouldAutoWsFallback({
+              mobile,
+              mode: String(process.env.MARVIS_WS_MODE ?? ""),
+              autoDisabled: String(process.env.MARVIS_RISK_AUTO_WS ?? "") === "0",
+              riskStatus: status,
+            })
           if (autoEnabled) {
             probeReachable = await probeLocalRelay()
             if (probeReachable) {

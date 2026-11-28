@@ -1,3 +1,17 @@
+## 0.8.9 — 2026-11-28
+
+**在 0.8.8 基础上：补回 BOM 配置修复 + WS 风控熔断闸修复，并发默认调到 8**
+
+- **fix**：openclaw.json 若被 Windows PowerShell `Set-Content -Encoding UTF8` 写成带 BOM，
+  `JSON.parse` 会拒绝 → 配置被静默跳过 → mode 掉回 auto 走错协议（12s 误报）。读配置前
+  剥 `\uFEFF`，且 `auto` 模式也改走本地网关 AG-UI relay（`src/marvis/openclaw.mjs`）。
+- **fix**：风控熔断闸原只覆盖 HTTP 直连，WS（relay/remote）整条绕过 —— WS 路径自己
+  `breaker.record(false)` 记了失败却无人读，熔断在 WS 下是死代码，一次用户请求 = 上游撞 7 次。
+  现在熔断闸对所有传输生效，并按 4100404 响应耗时区分「设备硬拉黑(<800ms)」与「节奏/预算限流(≥800ms)」：
+  硬拉黑时不再自动回退 WS、不再白撞（`src/hooks/loader.mjs`）。原可设 `MARVIS_RISK_GATE_WS=0` 关闸。
+- **改**：package.json magpie.maxConcurrency 由 1 调回 **8**（0.9.3 也把 1 视为“把 agent 并行按死”，
+  恢复高并发；如遇 4100404 可再调低）。
+
 ## 0.8.8 — 2026-11-27
 
 **并发默认降到 1：把多账号/高频突发的 4100404 风险压到最低**

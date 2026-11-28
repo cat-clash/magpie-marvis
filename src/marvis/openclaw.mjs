@@ -59,7 +59,10 @@ function fileConfig() {
   ]) {
     if (!p || !existsSync(p)) continue
     try {
-      const j = JSON.parse(readFileSync(p, "utf8"))
+      // PowerShell 的 `Set-Content -Encoding UTF8` 在 Windows PowerShell 5.1 会写 BOM；
+      // Node 的 JSON.parse 不接受 BOM，配置会被静默跳过 → mode=auto → 走错协议。
+      const raw = readFileSync(p, "utf8").replace(/^\uFEFF/, "")
+      const j = JSON.parse(raw)
       if (j && typeof j === "object") return j
     } catch {
       /* 坏配置就跳过 */
@@ -476,7 +479,12 @@ export async function* openclawChatStream(creds, payload, { signal, mode, conver
 
   // relay 走本地 xiaobao 网关的 AG-UI 协议（event=agent.run + payload），
   // 这是 2026-11-23 实测确认的格式；openclaw 的 method:connect 只适用于远端 wss。
-  if (c.mode === "relay") {
+  //
+  // ⚠ `auto` 也走本地网关 AG-UI：auto 的 URL 就是 ws://127.0.0.1:10123/，
+  //   而 method:connect 只在远端 wss 有意义。旧版把 auto 落到 openclawRemoteStream，
+  //   于是给 PC AG-UI 网关发 method:connect，服务端回「missing field event」，
+  //   12s 后误报「前端独占会话」。实测 2026-11-27 复现。
+  if (c.mode === "relay" || c.mode === "auto") {
     const { gatewayChatStream } = await import("./gateway.mjs")
     yield* gatewayChatStream(creds, payload, { signal, conversationId })
     return
