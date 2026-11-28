@@ -53,6 +53,7 @@ console.log(`probe ${cfg.url}/models -> ${await probeGateway(cfg.url) ? 'ok' : '
 文档纠偏：
 
 - README.md:17 和 README-FINAL.md:31 中“默认 gateway”改成“未显式配置时探测 8088，可达才走 gateway，否则按既有 off/openclaw 规则”；
+  （`README-FINAL.md` 已并入 `README.md` 并删除，本行为历史记录。）
 - 变量表明确分两条链路：8088 HTTP=`MARVIS_GATEWAY_URL`/`MARVIS_TRANSPORT`；10123 WS=`MARVIS_GW_URL`/`MARVIS_WS_MODE`；
 - 统一 phone-kit 路径描述（README.md:51 vs 根目录 gateway.example.json）。
 
