@@ -29,7 +29,8 @@ export function isReasoningEvent(evName) {
 // 重要边界：这条通道只是把请求交给 PC 客户端的本地 agent；
 // agent 最终仍要调 Marvis 的 HTTP 模型网关，而 PC 端目前被 4100404 全局风控
 // （回复通常表现为「当前环境有误，暂时无法回答你的问题」）。
-// 所以它是「链路可用、上游受限」，真正出内容要靠 remote（手机会话域）。
+// 所以它是「链路可用、上游受限」。PC 端被风控时，可改走本地 Python 网关（gateway/），
+// 或换服务端签发的设备指纹；0.9.8 起 remote（手机会话域）通道已移除，不再是备选。
 //
 // 流式改造（C 类）：gatewayChatStream 是 async generator，AG-UI 的每个
 // TEXT_MESSAGE_CONTENT delta 到达即实时 yield（不再全量攒完才 resolve）；
@@ -197,7 +198,7 @@ export async function* gatewayChatStream(creds, payload, { signal, conversationI
   const riskError = (detail) => {
     const err = new Error(
       "Marvis PC 客户端 agent 被风控拦截（risk_control_blocked，与 HTTP 直连的 4100404 同源）。" +
-        "换账号 / 换 IP 无效；改走 MARVIS_WS_MODE=remote（手机会话域）或本地 Python 网关。" +
+        "换账号 / 换 IP 无效；改走本地 Python 网关（gateway/ 目录 sh run.sh），或换服务端签发的设备指纹 qimei36。" +
         `上游文案：${detail || "（未提供）"}`,
     )
     err.code = "risk_control_blocked"
