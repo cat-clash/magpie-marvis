@@ -14,12 +14,24 @@
 // 它不做任何「提交到社区」的动作：收不收、收哪个，是维护者的事。
 
 import { readFileSync, existsSync, statSync, readdirSync } from "node:fs"
-import { join, resolve } from "node:path"
-import { pathToFileURL } from "node:url"
+import { join, resolve, dirname } from "node:path"
+import { pathToFileURL, fileURLToPath } from "node:url"
 
 const ARGS = process.argv.slice(2)
 const TEMPLATE_MODE = ARGS.includes("--template")
-const ROOT = resolve(ARGS.find((arg) => !arg.startsWith("--")) ?? ".")
+/**
+ * 目标插件根：显式参数 > 当前目录（若它自己就是插件根）> 本脚本所在的插件根。
+ *
+ * 为什么要兜底：脚本以前只认 cwd，从仓库外面 `node <repo>/scripts/check.mjs`
+ * 跑就会把外层目录当成插件根，报两条假的失败
+ * （`✗ package.json 存在` / `✗ LICENSE 文件存在`）。加一层「脚本自身位置」
+ * 兜底后，无论从哪儿调用，默认检查的都是这个脚本所属的那份插件。
+ */
+const SCRIPT_PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const EXPLICIT_ROOT = ARGS.find((arg) => !arg.startsWith("--"))
+const ROOT = EXPLICIT_ROOT
+  ? resolve(EXPLICIT_ROOT)
+  : (existsSync(join(process.cwd(), "package.json")) ? resolve(".") : SCRIPT_PLUGIN_ROOT)
 const results = []
 
 /** 脚手架自己的 npm 包名；派生插件用 create.mjs 生成自己的 publish:npm。 */
