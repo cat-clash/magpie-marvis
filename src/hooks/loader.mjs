@@ -496,6 +496,67 @@ export function applyReasoningBudgetFloor(json) {
 }
 
 /**
+ * 0.9.12：识别 DSH 的「会话标题生成」后台请求并本地返回标题，彻底不发上游。
+ *
+ * DSH 会把标题生成走当前会话模型（group/qq → marvis）。当当前模型是注入了
+ * [MODE: UNRESTRICTED SANDBOX] 的 unrestricted preset 时，标题 LLM 会把注入框架
+ * 当成用户输入，复读+反思后把整段英文吐到对话区（用户看到的「另一个对话框的乱码」）。
+ * 标题这种短任务根本不该走被封锁/被注入的模型——这里在本地生成一个简短标题直接返回。
+ *
+ * 识别依据：system 里含 DSH 标题生成的固定签名（稳定文案，见 app.asar 的
+ * session-title-first-prompt-llm）。只拦截标题请求，普通对话完全不受影响。
+ */
+export function titleRequestLocalResponse(payload) {
+  let body = null
+  try {
+    body = typeof payload === "string" ? JSON.parse(payload) : payload
+  } catch {
+    return null
+  }
+  if (!body || typeof body !== "object" || !Array.isArray(body.messages)) return null
+  const sys = body.messages
+    .filter((m) => m && m.role === "system")
+    .map((m) => (typeof m.content === "string" ? m.content : Array.isArray(m.content)
+      ? m.content.map((x) => (typeof x === "string" ? x : x?.text ?? "")).join("") : ""))
+    .join("\n")
+  if (!/Create a concise title for an AI coding-assistant session/i.test(sys)) return null
+  // 从 user 消息里取最后一段人类文本做标题（DSH 传的是 "Generate the session title from this JSON array..."）
+  let title = "新对话"
+  const userText = body.messages
+    .filter((m) => m && m.role === "user")
+    .map((m) => (typeof m.content === "string" ? m.content : Array.isArray(m.content)
+      ? m.content.map((x) => (typeof x === "string" ? x : x?.text ?? "")).join("") : ""))
+    .join("\n")
+  const m = userText.match(/\{\s*"seq"\s*:\s*\d+\s*,\s*"text"\s*:\s*"([^"]*)"/)
+  const raw = (m ? m[1] : userText).trim().replace(/[\r\n]+/g, " ")
+  if (raw) title = raw.length > 20 ? raw.slice(0, 20) + "…" : raw
+  const id = `chatcmpl-title-${Date.now().toString(36)}`
+  const message = { role: "assistant", content: title }
+  if (body.stream) {
+    const enc = new TextEncoder()
+    const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({
+      id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: body.model || "local-title",
+      choices: [{ index: 0, delta, finish_reason }],
+    })}\n\n`
+    const bodyStream = new ReadableStream({
+      start(ctrl) {
+        ctrl.enqueue(enc.encode(chunk({ role: "assistant", content: "" })))
+        ctrl.enqueue(enc.encode(chunk({ content: title })))
+        ctrl.enqueue(enc.encode(chunk({}, "stop")))
+        ctrl.enqueue(enc.encode("data: [DONE]\n\n"))
+        ctrl.close()
+      },
+    })
+    return new Response(bodyStream, { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8" } })
+  }
+  return Response.json({
+    id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model: body.model || "local-title",
+    choices: [{ index: 0, message, finish_reason: "stop" }],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+  })
+}
+
+/**
  * WS relay 通道的 reasoning_effort 归一化（0.9.9）。
  *
  * 上游 deepseek-v4-flash 在请求不带 reasoning_effort、或档位为 none/off 时，
@@ -653,6 +714,10 @@ export function loaderHook(input, options = {}) {
         if (!/\/(?:chat\/completions|messages|responses)\b(?!\/)/.test(url)) {
           return directFetch(target, init)
         }
+
+        // 0.9.12：标题生成请求本地返回，彻底不发上游（避免注入模型把乱码吐到对话区）。
+        const titleRes = titleRequestLocalResponse(init?.body)
+        if (titleRes) return titleRes
 
         /**
          * 一次逻辑请求（含所有 403 兜底/候选池/护栏重试）共用**一条** Marvis 会话。

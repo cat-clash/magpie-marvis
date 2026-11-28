@@ -1,3 +1,12 @@
+## 0.9.12 — 2026-11-28
+
+**根治「另一个对话框也能看到的乱码」：标题生成请求本地返回，不再走 marvis**
+
+- **现象**：新开对话后，一段英文（"GreetingThe user's message is a huge jailbreak prompt frame…"）显示在对话区/思考区；用户点"已停止"后未落盘。它是 **DSH 后台标题生成 LLM**（`session-title-first-prompt-llm`，route 跟随当前会话 `group/qq`）的输出——当前 preset 注入了 `[MODE: UNRESTRICTED SANDBOX]`，标题 LLM 把注入框架当用户输入，复读+反思吐出英文。
+- **为什么 v0.9.9/0.9.10/0.9.11 没解决**：那些改的是对话主链路的 reasoning 分类/丢弃；标题生成是 DSH 独立的后台 LLM 调用，同样走 group/qq，但请求体是标题专用 system（"Create a concise title for an AI coding-assistant session…"），reasoning 不在主会话链路里。
+- **修复**：`loader.mjs` 新增 `titleRequestLocalResponse(payload)`：识别 DSH 标题生成的固定 system 签名后，**在本地直接返回短标题**（从 user 消息的 JSON 里取第一条 text，≤20 字），流式/非流式都支持；普通对话请求返回 null 完全不受影响。标题任务不再发上游，注入模型的乱码无从产生。
+- **测试**：新增 `tests/title-local.test.mjs`（4 例：非流式/流式拦截、普通请求不拦、异常输入）；全量 **477 测试 / 472 pass / 0 fail / 5 skipped**。
+
 ## 0.9.11 — 2026-11-28
 
 **reasoning 全部丢弃：PC agent 卡死时倒出的工具调用 JSON / 重复段落不再显示**
