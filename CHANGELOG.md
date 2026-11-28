@@ -140,13 +140,13 @@
 **修复 relay 模式被 BOM 配置打成 auto，导致 openclaw 协议错发到 PC AG-UI 网关**
 
 - **根因**：Windows PowerShell 5.1 的 Set-Content -Encoding UTF8 会写 UTF-8 BOM（EF-BB-BF）。
-  Node 的 JSON.parse 不接受 BOM，ileConfig() 静默跳过 openclaw.json，于是 mode 从
+  Node 的 JSON.parse 不接受 BOM，fileConfig() 静默跳过 openclaw.json，于是 mode 从
   relay 落回 auto。auto 的 URL 是 10123，但旧代码把它送进 openclawRemoteStream
   发 {"type":"req","method":"connect"}；PC 客户端的 AG-UI 网关只认
   gateway.connected + event:"agent.run"，MarvisHost.log 明确回
   missing field event，插件 12s 后误报「握手无应答 / 前端独占会话」。
 - **修复**：
-  - ileConfig() 读取配置前 replace(/^\\uFEFF/, "")，BOM 配置也能解析。
+  - fileConfig() 读取配置前 replace(/^\\uFEFF/, "")，BOM 配置也能解析。
   - auto 与 relay 一样走 gatewayChatStream（本地 AG-UI 协议），
     method:"connect" 只留给真正的 remote wss。
   - 新增 tests/openclaw-config-bom.test.mjs 锁住 BOM 回归。
@@ -181,15 +181,12 @@ HEAD
   高度只够一行，且不把面板高度计入布局 —— 任何面板内容都会压到下面的「高级」折叠行上。
   换边框、换字号、压成文字链都治不好。首行文本改在**插件选项 JSON** 里配置：
   {"提示词首行替换": "你的首行文本"}（optionsExample 已给示例）。那一行彻底消失。
-  	ests/panel-manifest.test.mjs 同步放宽为「允许 panels 为空数组」。
+  tests/panel-manifest.test.mjs 同步放宽为「允许 panels 为空数组」。
 - **令牌额度文案**（src/hooks/usage.mjs）：实测上游 /v3/marvis_get_wallet 返回
   {"total_tokens":"10000000","used_tokens":"0",...} —— 这 1000 万是营销额度，实际请求
   走免费通道、不扣令牌。照实显示会被误读成「额度没生效」，现在 used=0 时显示
   共 10,000,000 tokens（上游未扣减）；有真实消耗时仍显示 X 可用 / 共 Y。
-- **修 
-ecordFailure 的 
-equire bug**：ESM 模块里 
-equire 未定义，被 try/catch 吞掉，
+- **修 recordFailure 的 require bug**：ESM 模块里 require 未定义，被 try/catch 吞掉，
   钱包读取失败时诊断文件永远写不出来。改为顶部 import { mkdirSync, writeFileSync }。
 
 ## 0.9.0 — 2026-11-27
@@ -199,11 +196,11 @@ equire 未定义，被 try/catch 吞掉，
 - **根因**：宿主给 magpie.panels（slot: provider）的高度只够**一行**。旧面板塞了
   「label + 值 + 设置按钮 + 状态行」，高度超出后把下面的「高级」折叠行挤上来，
   表现为文字重叠（两张截图实测）。改 CSS 局部数值治不好——是结构本身就超了一行。
-- **改法**（panel/first-line.html · irst-line.js · irst-line.css）：
+- **改法**（panel/first-line.html · first-line.js · first-line.css）：
   面板里只留**一个按钮**，按钮文字就是当前值（空值显示「内置兜底句」），末尾一个 ›。
-  长句单行省略、完整文本挂 	itle；点按钮仍弹出原来的 <dialog> 输入框。
+  长句单行省略、完整文本挂 title；点按钮仍弹出原来的 <dialog> 输入框。
   状态行改为 :empty { display: none }，空着时不占任何高度。
-  同时修掉一处会覆盖按钮结构的 	extContent 赋值。
+  同时修掉一处会覆盖按钮结构的 textContent 赋值。
 
 ## 0.8.9 — 2026-11-27
 
@@ -211,12 +208,12 @@ equire 未定义，被 try/catch 吞掉，
 
 - **问题**：设置页「首行文本」一行里，宿主渲染的字段名和面板内部的 .fl-label 两处「首行文本」
   叠在一起，显示成「首行文本（内置兜底句）」并对不齐。
-- **修复**（\panel/first-line.html\ / \irst-line.js\ / \irst-line.css\）：
+- **修复**（\panel/first-line.html\ / \first-line.js\ / \first-line.css\）：
   删掉面板内部的重复 label 与对应 CSS；空值文案由「（内置兜底句）」改为「内置兜底句」。
   现在该行只剩「当前值 + 设置…」，字段名完全交给宿主。
-- 顺带：\uth.options\ 的两条开关标签缩短到一行内（不再压到下面区块）。
-  - \irst_line_fallback\：拒绝时兜底改首行（403）
-  - \irst_line_always\：每个请求都改首行
+- 顺带：\auth.options\ 的两条开关标签缩短到一行内（不再压到下面区块）。
+  - \first_line_fallback\：拒绝时兜底改首行（403）
+  - \first_line_always\：每个请求都改首行
 
 ## 0.8.8 — 2026-11-27
 
@@ -259,7 +256,7 @@ equire 未定义，被 try/catch 吞掉，
 
 **修复会话刷屏根因：用户显式 off 时仍自动连 10123 建会话**
 
-- **修复（shouldAutoWsFallback 忽略 mode=off）**：HTTP 直连模式下遇到风控/异常，旧版会自动回退到真实 Marvis 10123 网关并发一条新请求，每次都在 PC 客户端建一条新对话。现在 mode=off 显式禁止自动回退（ailure-hints.mjs）；测试文件也加 MARVIS_RISK_AUTO_WS=0 总开关，避免 QA 跑测试时误连真实网关。
+- **修复（shouldAutoWsFallback 忽略 mode=off）**：HTTP 直连模式下遇到风控/异常，旧版会自动回退到真实 Marvis 10123 网关并发一条新请求，每次都在 PC 客户端建一条新对话。现在 mode=off 显式禁止自动回退（failure-hints.mjs）；测试文件也加 MARVIS_RISK_AUTO_WS=0 总开关，避免 QA 跑测试时误连真实网关。
 - **QA 测试合入主仓**：qa-e2e(9)、qa-concurrency(9)、qa-persistence(19)、qa-config(41) 共 78 条行为级测试 + regression 报告。
 
 ## 0.8.4 — 2026-11-26
