@@ -495,6 +495,37 @@ export function applyReasoningBudgetFloor(json) {
   return changed
 }
 
+/**
+ * WS relay 通道的 reasoning_effort 归一化（0.9.9）。
+ *
+ * 上游 deepseek-v4-flash 在请求不带 reasoning_effort、或档位为 none/off 时，
+ * 会把整段思考写进 delta.content —— 客户端把它当正文渲染，用户看到一大段
+ * 「让我先一步一步来…」的乱码。8088 网关的 api/openai.py::_normalize_effort
+ * 已把 off/none/空抬到 floor（默认 low），但 WS relay 通道（openclaw.json
+ * mode=relay → ws://127.0.0.1:10123）此前直接透传请求体，没有这道归一化。
+ * 这里对齐同一行为：缺档位或 off/none 时补 low，让上游把思考分到
+ * reasoning_content（DSH 客户端会把 reasoning_content 收进思考通道，不进正文）。
+ *
+ * 合法档位（low/medium/high/max）与 xhigh/ultra 等别名不动；
+ * MARVIS_REASONING_EFFORT_FLOOR 可覆盖默认值（非合法值时回退 low）。
+ *
+ * @param {Record<string, any>} json 请求体对象（就地修改）
+ * @returns {boolean} 是否发生改写
+ */
+export function normalizeWsReasoningEffort(json) {
+  if (!json || typeof json !== "object") return false
+  const raw = json.reasoning_effort ?? json.reasoning
+  const eff = String(raw ?? "").trim().toLowerCase()
+  const valid = ["low", "medium", "high", "max"]
+  if (valid.includes(eff)) return false
+  const alias = { xhigh: "max", "x-high": "max", highest: "max", ultra: "max", maximum: "max",
+                  minimal: "low", minimum: "low", min: "low", tiny: "low", least: "low" }
+  const configured = String(process.env.MARVIS_REASONING_EFFORT_FLOOR ?? "low").trim().toLowerCase()
+  const floor = valid.includes(configured) ? configured : "low"
+  json.reasoning_effort = alias[eff] ?? floor
+  return true
+}
+
 // ⚠ 不要用 TABLE（`DISPLAY_BY_SLOT`）当准入集合。
 //   TABLE 是**对外展示目录**，不是「上游可用集合」：`app-auto` / `file-auto` /
 //   `computer-auto` / `browser-auto` 这类旧真实槽位不在 TABLE 里，上游却仍然 200。
@@ -645,6 +676,9 @@ export function loaderHook(input, options = {}) {
             } catch {
               json = null
             }
+            // 0.9.9：WS relay 通道补 reasoning_effort 归一化（对齐 8088 网关行为），
+            // 否则上游把整段思考写进 delta.content，正文出现「乱码」。
+            normalizeWsReasoningEffort(json)
             // 流式接线（C 类改造）：WS 通道（relay→AG-UI gateway / remote→手机会话域）
             // 在宿主要求 stream:true 时，把实时增量迭代器包成 chat.completion.chunk
             // 的 SSE 响应 —— 不再全量攒完才吐出。chunk 构造复用 openclawResponse

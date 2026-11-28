@@ -1,3 +1,13 @@
+## 0.9.9 — 2026-11-28
+
+**修复：WS relay 通道缺 reasoning_effort 归一化，模型思考漏进正文（显示为「乱码」）**
+
+- **现象**：路由组 `qq`（marvis/deepseek-v4-1-flash-*）走 `openclaw.json` 的 `mode=relay`（ws://127.0.0.1:10123）时，请求体不带 `reasoning_effort`（近期 8 条 `group/qq` 路由记录 7 条无 effort 字段）。上游 deepseek-v4-flash 在该情况下把整段思考写进 `delta.content`，客户端当正文渲染，会话里出现「让我先一步一步来…」「The user is pushing back…」这类看起来像乱码的文本。
+- **根因**：`reasoning_effort` 归一化 `_normalize_effort`（off/none/空 → floor，默认 low）只存在于 8088 Python 网关的 `gateway/api/openai.py`；WS relay 通道此前直接透传请求体，没有这道归一化。而当前 PC 默认走 relay（8088 未运行）。
+- **修复**：`src/hooks/loader.mjs` 新增导出函数 `normalizeWsReasoningEffort(json)`，在 WS 分支 `callUpstream` 发出请求前调用：缺档位 / `none` / `off` / 空 → 补 `low`（可由 `MARVIS_REASONING_EFFORT_FLOOR` 覆盖），别名 `xhigh/ultra → max`、`minimal/tiny → low`；合法档位 `low/medium/high/max` 不动。思考因此走 `reasoning_content` 独立通道，不再污染正文。
+- **测试**：新增 `tests/ws-reasoning-effort.test.mjs`（7 例：缺档位、none/off、合法档位、别名、reasoning 字段兜底、非对象、环境变量覆盖）。
+- **注意**：这是止血（思考不进正文），不解决设备 qimei36 被腾讯硬拉黑导致的 502/429；换设备号才能恢复出答案。
+
 ## 0.9.8 — 2026-11-28
 
 **瘦身：删除手机端（Termux/remote 会话域/Android FFI）与手机登录，插件回到 PC-only**
