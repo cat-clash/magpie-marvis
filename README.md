@@ -336,8 +336,9 @@ EOF
 PC-only 瘦身、思考与正文彻底分离。
 
 原版 `MYCF711/magpie-marvis`（HTTP-only）2026-11-18 起停更；本仓库合并了
-`MYCF711/magpie-marvis`、`cat-clash/magpie-marvis-ws`、`yy158358/Marvis-proxy-public` 三条线的可用成果
-（协议与出票方案思路出处见 [`NOTICE.md`](./NOTICE.md)）。
+`MYCF711/magpie-marvis`、`cat-clash/magpie-marvis-ws`、`yy158358/Marvis-proxy-public` 三条线的可用成果。
+网关协议与手机出票方案的思路来自 `yy158358/Marvis-proxy-public`（MIT），本插件的网关转发实现已改写为
+通用 OpenAI 兼容转发。（原 `NOTICE.md` 已从仓库移除，归属信息在此保留。）
 
 ---
 
@@ -346,7 +347,6 @@ PC-only 瘦身、思考与正文彻底分离。
 | 文件 | 内容 |
 |---|---|
 | [`CHANGELOG.md`](./CHANGELOG.md) | 逐版本变更历史（含每次修复的实测依据） |
-| [`NOTICE.md`](./NOTICE.md) | 第三方来源与许可归属 |
 | [`FIX-4100404.md`](./FIX-4100404.md) | 4100404 专项排查记录 |
 | [`docs/`](./docs/) | 回归清单、补丁设计、503 优化方案、乱码定位手册 |
 | [`gateway/README.md`](./gateway/README.md) | 本地网关完整文档 |
