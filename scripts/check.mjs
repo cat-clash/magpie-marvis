@@ -195,17 +195,12 @@ if (pkg) {
      "files 白名单非空",
      "不写就把整个仓库（含测试、截图）发到 npm")
 
-  // ── ②b npm 发布能力：显示名 ≠ npm 名，必须有发布脚本与 secret 门 ──────
-  ok(typeof pkg.scripts?.["publish:npm"] === "string" && pkg.scripts["publish:npm"].length > 0,
-     "package.json 有 publish:npm 脚本",
-     "显示名不能直接 npm publish（含中文/大写会被 registry 拒）；发布时由脚本临时换名",
-     '加 "publish:npm": "node scripts/publish-npm.mjs"')
-  const publishFile = [join(ROOT, "scripts", "publish-npm.mjs"), join(ROOT, "publish-npm.mjs")]
-    .find((f) => existsSync(f))
-  ok(!!publishFile,
-     "publish-npm 脚本存在",
-     "有 publish:npm 脚本但没有文件，npm run publish:npm 会直接失败",
-     "从脚手架复制 scripts/publish-npm.mjs，改 PUBLISH_AS 为 npm 包名")
+  // ── ②b npm 发布能力：本仓库**不发布到 npm** ────────────────────────
+  // 分发渠道只有 git HEAD 与本地路径安装；`scripts/publish-npm.mjs` 与
+  // `scripts/npm-name.mjs` 已于 2026-11-29 删除（前者硬编码 PUBLISH_AS 与
+  // package.json 的 name 相同，实际是空壳；后者只服务已删除的发版流水线）。
+  // npm 名仍由 registry-entry.json 的 `package` 字段解析（见 resolveNpmName），
+  // 所以这里不再校验 publish:npm 脚本。
   // ②c Release 自动化：**本仓库按 git 源（HEAD）分发，不使用 tag / GitHub Release / release workflow**
   //    （2026-11-29 已删除 `.github/workflows/release.yml` 与 `scripts/release.mjs`），
   //    所以这里不再校验 release.yml —— 没有它是有意为之，不是缺失。

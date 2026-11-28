@@ -52,8 +52,7 @@
     "check": "node scripts/check.mjs",
     "create": "node scripts/create.mjs",
     "score": "node scripts/score.mjs",
-    "maintenance": "node scripts/check-maintenance.mjs",
-    "publish:npm": "node scripts/publish-npm.mjs"
+    "maintenance": "node scripts/check-maintenance.mjs"
   },
   "repository": {
     "type": "git",
