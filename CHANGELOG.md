@@ -1,13 +1,4 @@
-## 0.9.1 — 2026-11-29
-
-**版本号重定：`0.9.13` → `0.9.1`，三处声明位对齐**
-
-- **改动范围**：仅版本字段 —— `package.json` 的 `version`、`registry-entry.json` 的 `version`，以及本文件新增的这一条。**代码行为零改动**（`git diff` 只有这两行版本字符串）。
-- **为什么可以直接改成更小的号**：`magpie-marvis-final` 在 npm 上**从未发布过任何版本**（2026-11-29 实测 `registry.npmjs.org/magpie-marvis-final` 查无此包），不存在已发布号的回退冲突。
-- **源码里的 `0.9.13` 注释保留不动**：`src/marvis/gateway.mjs`、`src/marvis/openclaw.mjs`、`src/marvis/thinking-split.mjs`、`tests/thinking-split.test.mjs` 里的 `0.9.13` 是「该行为从哪个版本引入」的历史说明，改成 `0.9.1` 会让版本谱系失真。
-- **下面 `0.9.13` 的条目原样保留**，作为那批改动的变更记录。
-
-## 0.9.13 — 2026-11-28
+## 0.9.1 — 2026-11-28
 
 **revert「思考全丢弃」+ 正文流按行切分：英文思考进 reasoning_content（可折叠），中文回答留在正文**
 
@@ -195,7 +186,10 @@ HEAD
   {"total_tokens":"10000000","used_tokens":"0",...} —— 这 1000 万是营销额度，实际请求
   走免费通道、不扣令牌。照实显示会被误读成「额度没生效」，现在 used=0 时显示
   共 10,000,000 tokens（上游未扣减）；有真实消耗时仍显示 X 可用 / 共 Y。
-- **修 ecordFailure 的 equire bug**：ESM 模块里 equire 未定义，被 try/catch 吞掉，
+- **修 
+ecordFailure 的 
+equire bug**：ESM 模块里 
+equire 未定义，被 try/catch 吞掉，
   钱包读取失败时诊断文件永远写不出来。改为顶部 import { mkdirSync, writeFileSync }。
 
 ## 0.9.0 — 2026-11-27
